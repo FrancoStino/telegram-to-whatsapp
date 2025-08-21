@@ -1,0 +1,405 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Telegram ↔ WhatsApp Bridge</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        'inter': ['Inter', 'system-ui', 'sans-serif'],
+                    },
+                    colors: {
+                        telegram: '#0088cc',
+                        whatsapp: '#25D366',
+                    }
+                }
+            }
+        };
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-slate-50 font-inter antialiased">
+    <!-- @COMPONENT: Header -->
+    <header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex items-center space-x-3">
+                    <div class="flex items-center space-x-2">
+                        <i class="fab fa-telegram text-telegram text-2xl"></i>
+                        <i class="fas fa-arrow-right text-slate-400 text-sm"></i>
+                        <i class="fab fa-whatsapp text-whatsapp text-2xl"></i>
+                    </div>
+                    <h1 class="text-xl font-semibold text-slate-900">Message Bridge</h1>
+                </div>
+                
+                <div class="flex items-center space-x-4">
+                    <!-- @STATE: bridgeActive:boolean = false -->
+                    <div class="flex items-center space-x-2">
+                        <span class="text-sm font-medium text-slate-700">Bridge Status:</span>
+                        <span data-bind="bridgeStatus" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                            <i class="fas fa-circle text-red-400 text-xs mr-1.5"></i>
+                            Disconnected
+                        </span>
+                    </div>
+                    
+                    <!-- @FUNCTIONALITY: Toggle bridge on/off -->
+                    <button data-event="click:toggleBridge" class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent bg-slate-200 transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2">
+                        <span class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out translate-x-0"></span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+    <!-- @END_COMPONENT: Header -->
+
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            
+            <!-- @COMPONENT: ConnectionStatus -->
+            <div class="lg:col-span-2 space-y-6">
+                <!-- Service Status Cards -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <!-- Telegram Status -->
+                    <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+                        <div class="flex items-center justify-between mb-4">
+                            <div class="flex items-center space-x-3">
+                                <div class="w-10 h-10 bg-telegram/10 rounded-lg flex items-center justify-center">
+                                    <i class="fab fa-telegram text-telegram text-lg"></i>
+                                </div>
+                                <div>
+                                    <h3 class="text-lg font-semibold text-slate-900">Telegram Bot</h3>
+                                    <p class="text-sm text-slate-500">@YourBridgeBot</p>
+                                </div>
+                            </div>
+                            <span data-bind="telegramStatus" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                <i class="fas fa-circle text-green-400 text-xs mr-1.5"></i>
+                                Connected
+                            </span>
+                        </div>
+                        
+                        <div class="space-y-3">
+                            <div class="flex justify-between text-sm">
+                                <span class="text-slate-600">Bot Token</span>
+                                <span data-bind="botToken" class="font-mono text-slate-900">****1234:ABCD****</span>
+                            </div>
+                            <div class="flex justify-between text-sm">
+                                <span class="text-slate-600">Last Message</span>
+                                <span data-bind="lastTelegramMessage" class="text-slate-900">2 minutes ago</span>
+                            </div>
+                            <div class="flex justify-between text-sm">
+                                <span class="text-slate-600">Messages Today</span>
+                                <span data-bind="telegramMessagesToday" class="text-slate-900">47</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- WhatsApp Status -->
+                    <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+                        <div class="flex items-center justify-between mb-4">
+                            <div class="flex items-center space-x-3">
+                                <div class="w-10 h-10 bg-whatsapp/10 rounded-lg flex items-center justify-center">
+                                    <i class="fab fa-whatsapp text-whatsapp text-lg"></i>
+                                </div>
+                                <div>
+                                    <h3 class="text-lg font-semibold text-slate-900">WhatsApp Web</h3>
+                                    <p class="text-sm text-slate-500">+1 234 567 8900</p>
+                                </div>
+                            </div>
+                            <span data-bind="whatsappStatus" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+                                <i class="fas fa-circle text-amber-400 text-xs mr-1.5"></i>
+                                Authenticating
+                            </span>
+                        </div>
+                        
+                        <div class="space-y-3">
+                            <div class="flex justify-between text-sm">
+                                <span class="text-slate-600">Target Group</span>
+                                <span data-bind="targetGroup" class="text-slate-900">Bridge Group</span>
+                            </div>
+                            <div class="flex justify-between text-sm">
+                                <span class="text-slate-600">Last Forward</span>
+                                <span data-bind="lastWhatsappForward" class="text-slate-900">5 minutes ago</span>
+                            </div>
+                            <div class="flex justify-between text-sm">
+                                <span class="text-slate-600">Forwards Today</span>
+                                <span data-bind="whatsappForwardsToday" class="text-slate-900">45</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Message Activity Feed -->
+                <div class="bg-white rounded-xl shadow-sm border border-slate-200">
+                    <div class="p-6 border-b border-slate-200">
+                        <div class="flex items-center justify-between">
+                            <h3 class="text-lg font-semibold text-slate-900">Recent Activity</h3>
+                            <button data-event="click:clearLogs" class="text-sm text-slate-500 hover:text-slate-700 transition-colors">
+                                <i class="fas fa-trash-can mr-1"></i>
+                                Clear
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="divide-y divide-slate-100 max-h-96 overflow-y-auto">
+                        <!-- @MAP: activityLogs.map(log => ( -->
+                        <div data-mock="true" class="p-4 hover:bg-slate-50 transition-colors">
+                            <div class="flex items-start space-x-3">
+                                <div class="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0">
+                                    <i class="fas fa-arrow-right text-green-600 text-xs"></i>
+                                </div>
+                                <div class="flex-1 min-w-0">
+                                    <div class="flex items-center justify-between mb-1">
+                                        <p class="text-sm font-medium text-slate-900">Message forwarded successfully</p>
+                                        <span class="text-xs text-slate-500">2 minutes ago</span>
+                                    </div>
+                                    <p class="text-sm text-slate-600">From: @telegram_user → WhatsApp Group</p>
+                                    <p class="text-xs text-slate-500 mt-1 truncate">Content: "Hello everyone, this is a test message from Telegram!"</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div data-mock="true" class="p-4 hover:bg-slate-50 transition-colors">
+                            <div class="flex items-start space-x-3">
+                                <div class="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
+                                    <i class="fas fa-info text-blue-600 text-xs"></i>
+                                </div>
+                                <div class="flex-1 min-w-0">
+                                    <div class="flex items-center justify-between mb-1">
+                                        <p class="text-sm font-medium text-slate-900">WhatsApp connection established</p>
+                                        <span class="text-xs text-slate-500">5 minutes ago</span>
+                                    </div>
+                                    <p class="text-sm text-slate-600">QR code scanned successfully</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div data-mock="true" class="p-4 hover:bg-slate-50 transition-colors">
+                            <div class="flex items-start space-x-3">
+                                <div class="w-8 h-8 bg-amber-100 rounded-full flex items-center justify-center flex-shrink-0">
+                                    <i class="fas fa-exclamation-triangle text-amber-600 text-xs"></i>
+                                </div>
+                                <div class="flex-1 min-w-0">
+                                    <div class="flex items-center justify-between mb-1">
+                                        <p class="text-sm font-medium text-slate-900">Rate limit warning</p>
+                                        <span class="text-xs text-slate-500">12 minutes ago</span>
+                                    </div>
+                                    <p class="text-sm text-slate-600">Approaching Telegram API rate limit (40/50 messages per minute)</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div data-mock="true" class="p-4 hover:bg-slate-50 transition-colors">
+                            <div class="flex items-start space-x-3">
+                                <div class="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0">
+                                    <i class="fas fa-play text-green-600 text-xs"></i>
+                                </div>
+                                <div class="flex-1 min-w-0">
+                                    <div class="flex items-center justify-between mb-1">
+                                        <p class="text-sm font-medium text-slate-900">Bridge service started</p>
+                                        <span class="text-xs text-slate-500">15 minutes ago</span>
+                                    </div>
+                                    <p class="text-sm text-slate-600">Telegram webhook configured and listening</p>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- @END_MAP )) -->
+                    </div>
+                </div>
+            </div>
+            <!-- @END_COMPONENT: ConnectionStatus -->
+
+            <!-- @COMPONENT: ConfigurationPanel -->
+            <div class="space-y-6">
+                <!-- QR Code Authentication -->
+                <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+                    <h3 class="text-lg font-semibold text-slate-900 mb-4">WhatsApp Authentication</h3>
+                    
+                    <div class="text-center">
+                        <div class="w-48 h-48 mx-auto bg-slate-100 rounded-lg flex items-center justify-center mb-4">
+                            <!-- QR Code placeholder - in real implementation, this would be generated by whatsapp-web.js -->
+                            <div data-implementation="QR code generated by whatsapp-web.js library" class="w-40 h-40 bg-white border-2 border-slate-300 rounded flex items-center justify-center">
+                                <div class="text-center">
+                                    <i class="fas fa-qrcode text-slate-400 text-3xl mb-2"></i>
+                                    <p class="text-xs text-slate-500">Scan with WhatsApp</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <p class="text-sm text-slate-600 mb-4">
+                            Open WhatsApp on your phone and scan this QR code to connect
+                        </p>
+                        
+                        <button data-event="click:refreshQR" class="inline-flex items-center px-3 py-2 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
+                            <i class="fas fa-redo mr-2"></i>
+                            Refresh QR Code
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Configuration Settings -->
+                <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+                    <h3 class="text-lg font-semibold text-slate-900 mb-4">Configuration</h3>
+                    
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-2">Telegram Bot Token</label>
+                            <div class="relative">
+                                <input 
+                                    type="password" 
+                                    data-bind="botToken"
+                                    value="1234567890:ABCDEFghijklmnopQRSTUVwxyz" 
+                                    data-mock="true"
+                                    class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    placeholder="Enter your bot token"
+                                />
+                                <button data-event="click:toggleTokenVisibility" class="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600">
+                                    <i class="fas fa-eye text-sm"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-2">WhatsApp Target Group</label>
+                            <select data-bind="targetGroup" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                                <option data-mock="true">Bridge Group</option>
+                                <option data-mock="true">Family Group</option>
+                                <option data-mock="true">Work Team</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-2">Message Format</label>
+                            <div class="space-y-2">
+                                <label class="flex items-center">
+                                    <input type="radio" name="messageFormat" value="simple" class="text-blue-600 focus:ring-blue-500" checked data-mock="true"/>
+                                    <span class="ml-2 text-sm text-slate-700">Simple forwarding</span>
+                                </label>
+                                <label class="flex items-center">
+                                    <input type="radio" name="messageFormat" value="formatted" class="text-blue-600 focus:ring-blue-500" data-mock="true"/>
+                                    <span class="ml-2 text-sm text-slate-700">Include sender info</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <label class="block text-sm font-medium text-slate-700">Enable Bridge</label>
+                                <p class="text-xs text-slate-500">Automatically forward new messages</p>
+                            </div>
+                            <button data-event="click:toggleAutoForward" class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent bg-blue-600 transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2">
+                                <span class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out translate-x-5"></span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Statistics -->
+                <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+                    <h3 class="text-lg font-semibold text-slate-900 mb-4">Statistics</h3>
+                    
+                    <div class="space-y-4">
+                        <div class="flex justify-between items-center">
+                            <span class="text-sm text-slate-600">Messages Today</span>
+                            <span data-bind="messagestoday" class="text-sm font-semibold text-slate-900">47</span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-sm text-slate-600">Success Rate</span>
+                            <span data-bind="successRate" class="text-sm font-semibold text-green-600">98.9%</span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-sm text-slate-600">Uptime</span>
+                            <span data-bind="uptime" class="text-sm font-semibold text-slate-900">2d 14h 23m</span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-sm text-slate-600">Last Restart</span>
+                            <span data-bind="lastRestart" class="text-sm font-semibold text-slate-900">2 days ago</span>
+                        </div>
+                    </div>
+
+                    <div class="mt-6 pt-4 border-t border-slate-200">
+                        <button data-event="click:restartService" class="w-full inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
+                            <i class="fas fa-redo mr-2"></i>
+                            Restart Bridge Service
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <!-- @END_COMPONENT: ConfigurationPanel -->
+        </div>
+    </div>
+
+    <!-- @COMPONENT: StatusIndicator (floating) -->
+    <div class="fixed bottom-6 right-6">
+        <div class="bg-white rounded-full shadow-lg border border-slate-200 p-3">
+            <div class="flex items-center space-x-2">
+                <div data-bind="connectionStatus" class="w-3 h-3 bg-green-400 rounded-full animate-pulse"></div>
+                <span class="text-sm font-medium text-slate-700">Online</span>
+            </div>
+        </div>
+    </div>
+    <!-- @END_COMPONENT: StatusIndicator -->
+
+    <script>
+        // TODO: Implement business logic, API calls, or state management
+        (function() {
+            // Scoped JavaScript for UI interactions only
+            
+            // Toggle switches simulation
+            const toggles = document.querySelectorAll('[data-event^="click:toggle"]');
+            toggles.forEach(toggle => {
+                toggle.addEventListener('click', function() {
+                    const span = this.querySelector('span');
+                    const isOn = span.classList.contains('translate-x-5');
+                    
+                    if (isOn) {
+                        span.classList.remove('translate-x-5');
+                        span.classList.add('translate-x-0');
+                        this.classList.remove('bg-blue-600');
+                        this.classList.add('bg-slate-200');
+                    } else {
+                        span.classList.remove('translate-x-0');
+                        span.classList.add('translate-x-5');
+                        this.classList.remove('bg-slate-200');
+                        this.classList.add('bg-blue-600');
+                    }
+                });
+            });
+
+            // Password visibility toggle
+            const passwordToggle = document.querySelector('[data-event="click:toggleTokenVisibility"]');
+            if (passwordToggle) {
+                passwordToggle.addEventListener('click', function() {
+                    const input = this.parentElement.querySelector('input');
+                    const icon = this.querySelector('i');
+                    
+                    if (input.type === 'password') {
+                        input.type = 'text';
+                        icon.classList.remove('fa-eye');
+                        icon.classList.add('fa-eye-slash');
+                    } else {
+                        input.type = 'password';
+                        icon.classList.remove('fa-eye-slash');
+                        icon.classList.add('fa-eye');
+                    }
+                });
+            }
+
+            // QR Code refresh simulation
+            const qrRefresh = document.querySelector('[data-event="click:refreshQR"]');
+            if (qrRefresh) {
+                qrRefresh.addEventListener('click', function() {
+                    // In real implementation, this would regenerate the QR code
+                    this.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Refreshing...';
+                    setTimeout(() => {
+                        this.innerHTML = '<i class="fas fa-redo mr-2"></i>Refresh QR Code';
+                    }, 2000);
+                });
+            }
+        })();
+    </script>
+</body>
+</html>
