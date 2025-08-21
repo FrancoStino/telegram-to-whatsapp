@@ -10,63 +10,85 @@ export class WhatsAppService {
 
   async initialize(): Promise<void> {
     try {
+      // Different configurations for different environments
+      const isProd = process.env.NODE_ENV === "production";
+      const isReplit = process.env.REPL_ID !== undefined;
+
+      let puppeteerConfig: any = {
+        headless: true,
+        args: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-dev-shm-usage",
+          "--disable-accelerated-2d-canvas",
+          "--no-first-run",
+          "--no-zygote",
+          "--disable-gpu",
+          "--disable-web-security",
+          "--disable-features=VizDisplayCompositor",
+          "--single-process",
+          "--disable-background-timer-throttling",
+          "--disable-renderer-backgrounding",
+          "--disable-extensions",
+          "--disable-default-apps",
+        ],
+      };
+
+      // Only set executablePath on Replit
+      if (isReplit) {
+        puppeteerConfig.executablePath =
+          "/nix/store/zi4f80l169xlmivz8vja8wlphq74qqk0-chromium-125.0.6422.141/bin/chromium";
+      }
+      // On Render and other platforms, let Puppeteer find Chrome automatically
+      // You might need to install chrome in your Render build if it's not available
+
       this.client = new Client({
         authStrategy: new LocalAuth(),
-        puppeteer: {
-          headless: true,
-          executablePath: '/nix/store/zi4f80l169xlmivz8vja8wlphq74qqk0-chromium-125.0.6422.141/bin/chromium',
-          args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
-            '--disable-gpu',
-            '--disable-web-security',
-            '--disable-features=VizDisplayCompositor',
-            '--single-process',
-            '--disable-background-timer-throttling',
-            '--disable-renderer-backgrounding',
-            '--disable-extensions',
-            '--disable-default-apps'
-          ]
-        }
+        puppeteer: puppeteerConfig,
       });
 
-      this.client.on('qr', async (qr: string) => {
+      this.client.on("qr", async (qr: string) => {
         this.qrCode = qr;
         await this.updateStatus("authenticating", { qrCode: qr });
-        await this.logActivity("info", "QR code generated", "Scan QR code with WhatsApp to authenticate");
+        await this.logActivity(
+          "info",
+          "QR code generated",
+          "Scan QR code with WhatsApp to authenticate",
+        );
       });
 
-      this.client.on('ready', async () => {
+      this.client.on("ready", async () => {
         this.isConnected = true;
         this.qrCode = null;
         await this.updateStatus("connected");
-        await this.logActivity("connection_established", "WhatsApp Web connected", "QR code scanned successfully");
+        await this.logActivity(
+          "connection_established",
+          "WhatsApp Web connected",
+          "QR code scanned successfully",
+        );
       });
 
-      this.client.on('auth_failure', async (msg: any) => {
+      this.client.on("auth_failure", async (msg: any) => {
         await this.updateStatus("disconnected", { error: msg });
         await this.logActivity("error", "WhatsApp authentication failed", msg);
       });
 
-      this.client.on('disconnected', async (reason: any) => {
+      this.client.on("disconnected", async (reason: any) => {
         this.isConnected = false;
         await this.updateStatus("disconnected", { reason });
         await this.logActivity("warning", "WhatsApp disconnected", reason);
       });
 
-      this.client.on('message', async (msg: any) => {
+      this.client.on("message", async (msg: any) => {
         // Handle incoming WhatsApp messages if needed for two-way sync
       });
 
       await this.client.initialize();
-
     } catch (error) {
       console.error("Failed to initialize WhatsApp client:", error);
-      await this.updateStatus("disconnected", { error: (error as Error).message });
+      await this.updateStatus("disconnected", {
+        error: (error as Error).message,
+      });
       throw error;
     }
   }
@@ -93,7 +115,7 @@ export class WhatsAppService {
     try {
       // Find the target group or channel
       const chats = await this.client.getChats();
-      const cleanTargetName = this.targetGroup?.replace(/^(📢 |👥 )/, '') || '';
+      const cleanTargetName = this.targetGroup?.replace(/^(📢 |👥 )/, "") || "";
       const targetChat = chats.find((chat: any) => {
         return chat.isChannel && chat.name === cleanTargetName;
       });
@@ -105,18 +127,20 @@ export class WhatsAppService {
       // Format message based on configuration
       const config = await storage.getBridgeConfig();
       let formattedMessage = message;
-      
+
       if (config?.messageFormat === "formatted" && metadata?.senderUsername) {
         formattedMessage = `📱 From Telegram (@${metadata.senderUsername}):\n\n${message}`;
       }
 
-      await this.client.sendMessage(targetChat.id._serialized, formattedMessage);
-      
+      await this.client.sendMessage(
+        targetChat.id._serialized,
+        formattedMessage,
+      );
+
       await this.updateStatus("connected", {
         lastForwardTime: new Date(),
-        forwardsCount: await this.incrementForwardCount()
+        forwardsCount: await this.incrementForwardCount(),
       });
-
     } catch (error) {
       console.error("Error sending WhatsApp message:", error);
       throw error;
@@ -137,7 +161,12 @@ export class WhatsAppService {
     });
   }
 
-  private async logActivity(type: string, title: string, description?: string, content?: string): Promise<void> {
+  private async logActivity(
+    type: string,
+    title: string,
+    description?: string,
+    content?: string,
+  ): Promise<void> {
     await storage.createActivityLog({
       type,
       title,
@@ -173,19 +202,19 @@ export class WhatsAppService {
 
     try {
       console.log("🔍 Looking for channels...");
-      
+
       // Try different methods to get channels since they extend Base, not Chat
       let channels: any[] = [];
-      
+
       // Method 1: Check if there's a dedicated getChannels method
-      if (typeof (this.client as any).getChannels === 'function') {
+      if (typeof (this.client as any).getChannels === "function") {
         console.log("📞 Calling client.getChannels()...");
         channels = await (this.client as any).getChannels();
         console.log(`✅ Found ${channels.length} channels via getChannels()`);
       } else {
         console.log("❌ getChannels() method not available");
       }
-      
+
       // Method 2: Check client.pupPage for direct WhatsApp Web access
       if (channels.length === 0 && (this.client as any).pupPage) {
         console.log("🔍 Trying to find channels via pupPage...");
@@ -193,20 +222,28 @@ export class WhatsAppService {
           // Try to evaluate JavaScript in the browser to find channels
           const result = await (this.client as any).pupPage.evaluate(() => {
             // This is browser context - look for WhatsApp Web channel objects
-            const Store = window.Store || window.require('WAWebMain');
+            const Store = window.Store || window.require("WAWebMain");
             if (Store && Store.Channel) {
-              const channels = Store.Channel.getModelsArray ? Store.Channel.getModelsArray() : [];
-              return channels.map((ch: any) => ({ name: ch.name || ch.formattedTitle, id: ch.id }));
+              const channels = Store.Channel.getModelsArray
+                ? Store.Channel.getModelsArray()
+                : [];
+              return channels.map((ch: any) => ({
+                name: ch.name || ch.formattedTitle,
+                id: ch.id,
+              }));
             }
             return [];
           });
           channels = result || [];
           console.log(`✅ Found ${channels.length} channels via pupPage`);
         } catch (puppeteerError) {
-          console.log("❌ pupPage channel search failed:", puppeteerError.message);
+          console.log(
+            "❌ pupPage channel search failed:",
+            puppeteerError.message,
+          );
         }
       }
-      
+
       // Method 3: Fallback - check all chats for any that might be channels
       if (channels.length === 0) {
         console.log("🔍 Fallback: checking chats for channels...");
@@ -214,9 +251,14 @@ export class WhatsAppService {
         channels = chats.filter((chat: any) => chat.isChannel === true);
         console.log(`✅ Found ${channels.length} channels in chats`);
       }
-      
-      const result = channels.map((channel: any) => `📢 ${channel.name || channel.formattedTitle || 'Unnamed Channel'}`).sort();
-      
+
+      const result = channels
+        .map(
+          (channel: any) =>
+            `📢 ${channel.name || channel.formattedTitle || "Unnamed Channel"}`,
+        )
+        .sort();
+
       console.log(`🎯 Final result: ${result.length} channels`);
       return result;
     } catch (error) {
