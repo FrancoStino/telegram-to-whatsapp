@@ -1,6 +1,6 @@
 import pkg from "whatsapp-web.js";
-const { Client, LocalAuth } = pkg;
 import { storage } from "../storage";
+const { Client, LocalAuth } = pkg;
 
 export class WhatsAppService {
   private client: any = null;
@@ -13,9 +13,10 @@ export class WhatsAppService {
       // Different configurations for different environments
       const isProd = process.env.NODE_ENV === "production";
       const isReplit = process.env.REPL_ID !== undefined;
+      const isRender = process.env.RENDER !== undefined;
 
       let puppeteerConfig: any = {
-        headless: true,
+        headless: "new", // Use new headless mode
         args: [
           "--no-sandbox",
           "--disable-setuid-sandbox",
@@ -31,6 +32,16 @@ export class WhatsAppService {
           "--disable-renderer-backgrounding",
           "--disable-extensions",
           "--disable-default-apps",
+          "--disable-blink-features=AutomationControlled",
+          "--no-default-browser-check",
+          "--disable-plugins",
+          "--disable-sync",
+          "--disable-translate",
+          "--disable-background-networking",
+          "--disable-background-downloads",
+          "--disable-component-extensions-with-background-pages",
+          "--disable-ipc-flooding-protection",
+          "--memory-pressure-off",
         ],
       };
 
@@ -39,8 +50,17 @@ export class WhatsAppService {
         puppeteerConfig.executablePath =
           "/nix/store/zi4f80l169xlmivz8vja8wlphq74qqk0-chromium-125.0.6422.141/bin/chromium";
       }
-      // On Render and other platforms, let Puppeteer find Chrome automatically
-      // You might need to install chrome in your Render build if it's not available
+
+      // On Render, try to disable WhatsApp altogether or use a mock
+      if (isRender && !process.env.FORCE_WHATSAPP) {
+        console.log(
+          "🚫 WhatsApp disabled on Render - use FORCE_WHATSAPP=true to enable",
+        );
+        await this.updateStatus("disabled", {
+          reason: "WhatsApp disabled on Render platform",
+        });
+        return;
+      }
 
       this.client = new Client({
         authStrategy: new LocalAuth(),
