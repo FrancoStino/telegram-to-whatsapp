@@ -215,10 +215,11 @@ function initWhatsApp() {
 
     whatsappClient.on('ready', async () => {
         console.log('✅ WhatsApp Client è pronto!');
+        console.log(`🎯 Canale target configurato: ${WHATSAPP_CHANNEL_ID}`);
         isWhatsAppReady = true;
         qrCodeData = null;
 
-        // Log di tutti i canali WhatsApp disponibili
+        // Verifica rapida del canale target
         await logWhatsAppChannels();
     });
 
@@ -324,11 +325,9 @@ Canale WhatsApp: ${WHATSAPP_CHANNEL_ID}
                 return;
             }
 
-            ctx.reply('🔍 Recuperando lista canali WhatsApp... (controlla i logs per dettagli)');
+            ctx.reply('🔍 Recuperando lista canali WhatsApp...');
             await logWhatsAppChannels();
-            ctx.reply(
-                '✅ Lista canali stampata nei logs del server. Visita /channels endpoint per la versione JSON.',
-            );
+            ctx.reply("✅ Lista canali disponibile all'endpoint /channels");
             return;
         }
 
@@ -360,136 +359,137 @@ async function forwardToWhatsApp(telegramMessage) {
 
     // Gestione testo
     if (telegramMessage.text) {
-        content = `🏷️ *PREZZI WOW*\n\n${telegramMessage.text}`;
+        content = telegramMessage.text;
     }
 
     // Gestione caption per media
     if (telegramMessage.caption) {
-        content = `🏷️ *PREZZI WOW*\n\n${telegramMessage.caption}`;
+        content = telegramMessage.caption;
     }
 
-    // Gestione foto
+    // Gestione foto - Debug per le immagini
     if (telegramMessage.photo) {
-        // Prendi la foto con la risoluzione più alta
-        const photo = telegramMessage.photo[telegramMessage.photo.length - 1];
-        const fileUrl = await getFileUrl(photo.file_id);
-        media = await MessageMedia.fromUrl(fileUrl);
+        console.log('📸 Immagine rilevata:', telegramMessage.photo);
+        try {
+            // Prendi la foto con la risoluzione più alta
+            const photo = telegramMessage.photo[telegramMessage.photo.length - 1];
+            console.log('📸 Foto selezionata:', photo);
+            const fileUrl = await getFileUrl(photo.file_id);
+            console.log('📸 URL file:', fileUrl);
+
+            // Prova diversi metodi per caricare l'immagine
+            console.log('📸 Tentativo di creazione MessageMedia...');
+            media = await MessageMedia.fromUrl(fileUrl, {
+                unsafeMime: true,
+                filename: `image_${Date.now()}.jpg`,
+            });
+            console.log('📸 MessageMedia creato:', media ? 'SUCCESS' : 'FAILED');
+        } catch (error) {
+            console.error("❌ Errore nel processare l'immagine:", error);
+            throw error;
+        }
     }
 
-    // Gestione video
+    // Gestione video - Debug
     if (telegramMessage.video) {
-        const fileUrl = await getFileUrl(telegramMessage.video.file_id);
-        media = await MessageMedia.fromUrl(fileUrl);
+        console.log('🎥 Video rilevato:', telegramMessage.video);
+        try {
+            const fileUrl = await getFileUrl(telegramMessage.video.file_id);
+            console.log('🎥 URL file:', fileUrl);
+            media = await MessageMedia.fromUrl(fileUrl, {
+                unsafeMime: true,
+                filename: telegramMessage.video.file_name || `video_${Date.now()}.mp4`,
+            });
+            console.log('🎥 MessageMedia creato:', media ? 'SUCCESS' : 'FAILED');
+        } catch (error) {
+            console.error('❌ Errore nel processare il video:', error);
+            throw error;
+        }
     }
 
-    // Gestione documento
+    // Gestione documento - Debug
     if (telegramMessage.document) {
-        const fileUrl = await getFileUrl(telegramMessage.document.file_id);
-        media = await MessageMedia.fromUrl(fileUrl, {
-            filename: telegramMessage.document.file_name,
-        });
+        console.log('📄 Documento rilevato:', telegramMessage.document);
+        try {
+            const fileUrl = await getFileUrl(telegramMessage.document.file_id);
+            console.log('📄 URL file:', fileUrl);
+            media = await MessageMedia.fromUrl(fileUrl, {
+                filename: telegramMessage.document.file_name,
+                unsafeMime: true,
+            });
+            console.log('📄 MessageMedia creato:', media ? 'SUCCESS' : 'FAILED');
+        } catch (error) {
+            console.error('❌ Errore nel processare il documento:', error);
+            throw error;
+        }
     }
 
     // Invia al canale WhatsApp configurato
     const channelId = WHATSAPP_CHANNEL_ID;
+    console.log(`📤 Invio a canale: ${channelId}`);
 
-    // Invia il messaggio
-    if (media) {
-        await whatsappClient.sendMessage(channelId, media, { caption: content });
-        console.log('📤 Media inviato sul canale WhatsApp');
-    } else if (content) {
-        await whatsappClient.sendMessage(channelId, content);
-        console.log('📤 Messaggio testuale inviato sul canale WhatsApp');
+    try {
+        // Invia il messaggio
+        if (media) {
+            console.log('📤 Invio media con caption...');
+            await whatsappClient.sendMessage(channelId, media, {
+                caption: content || undefined,
+                sendMediaAsDocument: false,
+            });
+            console.log('✅ Media inviato sul canale WhatsApp');
+        } else if (content) {
+            console.log('📤 Invio messaggio testuale...');
+            await whatsappClient.sendMessage(channelId, content);
+            console.log('✅ Messaggio testuale inviato sul canale WhatsApp');
+        } else {
+            console.log('⚠️ Nessun contenuto da inviare');
+        }
+    } catch (error) {
+        console.error("❌ Errore specifico nell'invio:", error);
+        throw error;
     }
 }
 
-// Funzione per ottenere URL del file da Telegram
+// Funzione per ottenere URL del file da Telegram - con debug
 async function getFileUrl(fileId) {
-    const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
-    const file = await bot.telegram.getFile(fileId);
-    return `https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${file.file_path}`;
+    try {
+        console.log('🔗 Ottenendo URL per file ID:', fileId);
+        const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
+        const file = await bot.telegram.getFile(fileId);
+        const url = `https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${file.file_path}`;
+        console.log('🔗 URL generato:', url);
+        return url;
+    } catch (error) {
+        console.error("❌ Errore nell'ottenere URL del file:", error);
+        throw error;
+    }
 }
 
-// Funzione per loggare solo i canali WhatsApp
+// Funzione semplificata per loggare solo il canale target
 async function logWhatsAppChannels() {
     try {
-        console.log('\n📺 === LOG CANALI WHATSAPP ===');
+        console.log('\n📺 === VERIFICA CANALE TARGET ===');
 
-        // Ottieni tutti i canali
         const channels = await whatsappClient.getChannels();
+        const targetChannel = channels.find(
+            (ch) => (ch.id._serialized || ch.id) === WHATSAPP_CHANNEL_ID,
+        );
 
-        console.log(`🔍 Trovati ${channels.length} canali WhatsApp:`);
-        console.log('═══════════════════════════════════════');
-
-        // Log dei canali
-        if (channels.length > 0) {
-            console.log('\n📺 CANALI WHATSAPP:');
-            for (let i = 0; i < channels.length; i++) {
-                const channel = channels[i];
-                const channelId = channel.id._serialized || channel.id;
-
-                console.log(`\n📺 CANALE ${i + 1}:`);
-                console.log(`   Nome: ${channel.name || 'N/A'}`);
-                console.log(`   ID: ${channelId}`);
-                console.log(`   Descrizione: ${channel.description || 'Nessuna descrizione'}`);
-                console.log(`   Messaggi non letti: ${channel.unreadCount || 0}`);
-                console.log(
-                    `   Ultimo messaggio: ${
-                        channel.timestamp
-                            ? new Date(channel.timestamp * 1000).toLocaleString('it-IT')
-                            : 'N/A'
-                    }`,
-                );
-                console.log(`   Mutato: ${channel.isMuted ? 'Sì' : 'No'}`);
-                console.log(`   Solo lettura: ${channel.isReadOnly ? 'Sì' : 'No'}`);
-
-                // Indica se è il canale target configurato
-                if (channelId === WHATSAPP_CHANNEL_ID) {
-                    console.log(`   🎯 CANALE TARGET CONFIGURATO! ✅`);
-                }
-
-                // Controllo per canali con nomi relativi a prezzi/offerte
-                const channelName = (channel.name || '').toLowerCase();
-                if (
-                    channelName.includes('prezzi') ||
-                    channelName.includes('offerte') ||
-                    channelName.includes('sconti')
-                ) {
-                    console.log(`   🎯 CANALE TARGET POTENZIALE! (contiene parole chiave)`);
-                }
-
-                // Tenta di ottenere i subscriber
-                try {
-                    const subscribers = await channel.getSubscribers(10);
-                    console.log(
-                        `   Subscribers (primi 10): ${subscribers ? subscribers.length : 'N/A'}`,
-                    );
-                } catch (error) {
-                    console.log(`   Subscribers: Non accessibili`);
-                }
-
-                // Mostra ultimo messaggio se disponibile
-                if (channel.lastMessage) {
-                    const lastMsg = channel.lastMessage;
-                    const preview = lastMsg.body
-                        ? lastMsg.body.substring(0, 50) + '...'
-                        : '[Media o messaggio vuoto]';
-                    console.log(`   Ultimo contenuto: "${preview}"`);
-                }
-
-                console.log('   ───────────────────────────');
-            }
+        if (targetChannel) {
+            console.log('✅ Canale target trovato:');
+            console.log(`   Nome: ${targetChannel.name || 'N/A'}`);
+            console.log(`   ID: ${WHATSAPP_CHANNEL_ID}`);
+            console.log(`   Status: Configurato correttamente`);
         } else {
-            console.log('\n❌ Nessun canale trovato.');
+            console.log('❌ Canale target NON trovato');
+            console.log(`   ID cercato: ${WHATSAPP_CHANNEL_ID}`);
+            console.log(`   Canali disponibili: ${channels.length}`);
+            console.log("   Verifica l'ID del canale nelle variabili d'ambiente");
         }
 
-        console.log('\n🎯 CONFIGURAZIONE ATTUALE:');
-        console.log(`Canale target: ${WHATSAPP_CHANNEL_ID}`);
-        console.log('Per modificare il canale target, aggiorna WHATSAPP_CHANNEL_ID');
-        console.log('IMPORTANTE: Devi essere PROPRIETARIO del canale per inviare messaggi!');
         console.log('═══════════════════════════════════════\n');
     } catch (error) {
-        console.error('❌ Errore nel recupero dei canali WhatsApp:', error);
+        console.error('❌ Errore nella verifica del canale:', error);
     }
 }
 
