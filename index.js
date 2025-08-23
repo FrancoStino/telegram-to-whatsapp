@@ -9,7 +9,7 @@ require('dotenv').config();
 // Configurazione
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHANNEL_ID = process.env.TELEGRAM_CHANNEL_ID;
-const WHATSAPP_GROUP_ID = process.env.WHATSAPP_GROUP_ID;
+const WHATSAPP_CHANNEL_ID = process.env.WHATSAPP_CHANNEL_ID || '120363402931610117@newsletter';
 const PORT = process.env.PORT || 3000;
 
 // Express server per mantenere attivo il servizio su Render
@@ -56,7 +56,7 @@ app.get('/', (req, res) => {
                         <p><strong>/channels</strong> - Aggiorna lista canali WhatsApp</p>
                         
                         <div style="margin-top: 30px; font-size: 12px; color: #666;">
-                            Sistema attivo - Monitoraggio @prezzi_wow → WhatsApp
+                            Sistema attivo - Monitoraggio @prezzi_wow → Canale WhatsApp
                         </div>
                     </div>
                 </body>
@@ -109,21 +109,18 @@ app.get('/', (req, res) => {
     }
 });
 
-// Endpoint per visualizzare i canali WhatsApp
+// Endpoint per visualizzare solo i canali WhatsApp
 app.get('/channels', async (req, res) => {
     if (!isWhatsAppReady) {
         res.json({
             error: 'WhatsApp non è ancora connesso',
             channels: [],
-            groups: [],
         });
         return;
     }
 
     try {
         const channels = await whatsappClient.getChannels();
-        const chats = await whatsappClient.getChats();
-        const groups = chats.filter((chat) => chat.isGroup);
 
         const channelList = await Promise.all(
             channels.map(async (channel, index) => {
@@ -152,6 +149,7 @@ app.get('/channels', async (req, res) => {
                         channel.lastMessage?.body?.substring(0, 100) ||
                         '[Nessun messaggio o media]',
                     isTarget:
+                        (channel.id._serialized || channel.id) === WHATSAPP_CHANNEL_ID ||
                         (channel.name || '').toLowerCase().includes('prezzi') ||
                         (channel.name || '').toLowerCase().includes('offerte') ||
                         (channel.name || '').toLowerCase().includes('sconti'),
@@ -159,43 +157,29 @@ app.get('/channels', async (req, res) => {
             }),
         );
 
-        const groupList = groups.slice(0, 10).map((group, index) => ({
-            type: 'group',
-            index: index + 1,
-            name: group.name || 'N/A',
-            id: group.id._serialized || group.id,
-            unreadCount: group.unreadCount || 0,
-            lastActivity: group.timestamp
-                ? new Date(group.timestamp * 1000).toLocaleString('it-IT')
-                : 'N/A',
-            isMuted: group.isMuted,
-            lastMessagePreview:
-                group.lastMessage?.body?.substring(0, 100) || '[Nessun messaggio o media]',
-            isTarget:
-                (group.name || '').toLowerCase().includes('prezzi') ||
-                (group.name || '').toLowerCase().includes('offerte') ||
-                (group.name || '').toLowerCase().includes('sconti'),
-        }));
-
         res.json({
             totalChannels: channelList.length,
-            totalGroups: groups.length,
+            targetChannelId: WHATSAPP_CHANNEL_ID,
             channels: channelList,
-            groups: groupList,
-            note:
-                groups.length > 10 ? `Showing first 10 groups out of ${groups.length} total` : null,
-            targetSuggestions: {
-                channels: channelList.filter((c) => c.isTarget),
-                groups: groupList.filter((g) => g.isTarget),
-            },
+            targetChannel: channelList.find((c) => c.isTarget),
         });
     } catch (error) {
         res.json({
             error: error.message,
             channels: [],
-            groups: [],
         });
     }
+});
+
+// Endpoint status aggiornato
+app.get('/status', (req, res) => {
+    res.json({
+        whatsappReady: isWhatsAppReady,
+        telegramBotConfigured: !!TELEGRAM_BOT_TOKEN,
+        whatsappChannelId: WHATSAPP_CHANNEL_ID,
+        telegramChannelId: TELEGRAM_CHANNEL_ID || 'Auto-detect',
+        timestamp: new Date().toISOString(),
+    });
 });
 
 // Inizializza WhatsApp Client
@@ -280,8 +264,6 @@ function initTelegram() {
         );
 
         // Verifica se il messaggio proviene dal canale @prezzi_wow
-        // Dato che stiamo usando il bot @prezzi_wow_bot che è già nel canale,
-        // dovremmo ricevere solo messaggi da quel canale
         if (
             channelUsername !== 'prezzi_wow' &&
             TELEGRAM_CHANNEL_ID &&
@@ -306,9 +288,9 @@ function initTelegram() {
             console.error("❌ Errore nell'inoltro del messaggio:", error);
 
             // Se l'errore contiene un ID, probabilmente è quello del canale giusto
-            if (error.message && error.message.includes('@g.us')) {
+            if (error.message && error.message.includes('@newsletter')) {
                 console.log(
-                    "💡 SUGGERIMENTO: L'ID nel messaggio di errore potrebbe essere quello corretto da usare come WHATSAPP_GROUP_ID",
+                    "💡 SUGGERIMENTO: L'ID nel messaggio di errore potrebbe essere quello corretto da usare come WHATSAPP_CHANNEL_ID",
                 );
             }
         }
@@ -327,12 +309,11 @@ WhatsApp: ${isWhatsAppReady ? '✅ Connesso' : '❌ Disconnesso'}
 Canale monitorato: @prezzi_wow ${
                 TELEGRAM_CHANNEL_ID ? `(ID: ${TELEGRAM_CHANNEL_ID})` : '(Auto-detect)'
             }
-Gruppo WhatsApp: ${WHATSAPP_GROUP_ID || '❌ Non configurato'}
+Canale WhatsApp: ${WHATSAPP_CHANNEL_ID}
 
-🔧 Per configurare il gruppo WhatsApp:
+🔧 Per testare il sistema:
 1. Invia un messaggio di test
-2. Controlla i logs per l'ID del gruppo
-3. Aggiorna la variabile WHATSAPP_GROUP_ID`;
+2. Controlla i logs per conferma invio`;
             ctx.reply(statusMsg);
             return;
         }
@@ -354,7 +335,7 @@ Gruppo WhatsApp: ${WHATSAPP_GROUP_ID || '❌ Non configurato'}
         // Test di inoltro per messaggi privati
         try {
             await forwardToWhatsApp(ctx.message);
-            ctx.reply('✅ Messaggio inoltrato su WhatsApp');
+            ctx.reply('✅ Messaggio inoltrato sul canale WhatsApp');
         } catch (error) {
             ctx.reply("❌ Errore nell'inoltro: " + error.message);
         }
@@ -368,7 +349,7 @@ Gruppo WhatsApp: ${WHATSAPP_GROUP_ID || '❌ Non configurato'}
     process.once('SIGTERM', () => bot.stop('SIGTERM'));
 }
 
-// Funzione per inoltrare messaggi a WhatsApp
+// Funzione per inoltrare messaggi al canale WhatsApp
 async function forwardToWhatsApp(telegramMessage) {
     if (!whatsappClient || !isWhatsAppReady) {
         throw new Error('WhatsApp client non pronto');
@@ -409,26 +390,16 @@ async function forwardToWhatsApp(telegramMessage) {
         });
     }
 
-    // Determina la destinazione - cerca il canale specifico se non configurato
-    let chatId = WHATSAPP_GROUP_ID;
-
-    // Se non è configurato, cerca il canale nei logs
-    if (!chatId) {
-        console.log(
-            "⚠️ WHATSAPP_GROUP_ID non configurato. Controlla i logs per trovare l'ID del canale target.",
-        );
-        console.log('🎯 Cerca un canale con nome simile a "prezzi" o "offerte" nei logs');
-        // Usa un placeholder - il messaggio fallirà ma mostrerà l'errore con l'ID corretto
-        chatId = 'PLACEHOLDER_CHANNEL_ID';
-    }
+    // Invia al canale WhatsApp configurato
+    const channelId = WHATSAPP_CHANNEL_ID;
 
     // Invia il messaggio
     if (media) {
-        await whatsappClient.sendMessage(chatId, media, { caption: content });
-        console.log('📤 Media inviato su WhatsApp');
+        await whatsappClient.sendMessage(channelId, media, { caption: content });
+        console.log('📤 Media inviato sul canale WhatsApp');
     } else if (content) {
-        await whatsappClient.sendMessage(chatId, content);
-        console.log('📤 Messaggio testuale inviato su WhatsApp');
+        await whatsappClient.sendMessage(channelId, content);
+        console.log('📤 Messaggio testuale inviato sul canale WhatsApp');
     }
 }
 
@@ -439,19 +410,15 @@ async function getFileUrl(fileId) {
     return `https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${file.file_path}`;
 }
 
-// Funzione per loggare tutti i canali e gruppi WhatsApp
+// Funzione per loggare solo i canali WhatsApp
 async function logWhatsAppChannels() {
     try {
-        console.log('\n📺 === LOG CANALI E GRUPPI WHATSAPP ===');
+        console.log('\n📺 === LOG CANALI WHATSAPP ===');
 
-        // Ottieni tutti i canali e tutte le chat
+        // Ottieni tutti i canali
         const channels = await whatsappClient.getChannels();
-        const chats = await whatsappClient.getChats();
 
-        // Filtra i gruppi dalle chat
-        const groups = chats.filter((chat) => chat.isGroup);
-
-        console.log(`🔍 Trovati ${channels.length} canali e ${groups.length} gruppi WhatsApp:`);
+        console.log(`🔍 Trovati ${channels.length} canali WhatsApp:`);
         console.log('═══════════════════════════════════════');
 
         // Log dei canali
@@ -459,10 +426,11 @@ async function logWhatsAppChannels() {
             console.log('\n📺 CANALI WHATSAPP:');
             for (let i = 0; i < channels.length; i++) {
                 const channel = channels[i];
+                const channelId = channel.id._serialized || channel.id;
 
                 console.log(`\n📺 CANALE ${i + 1}:`);
                 console.log(`   Nome: ${channel.name || 'N/A'}`);
-                console.log(`   ID: ${channel.id._serialized || channel.id}`);
+                console.log(`   ID: ${channelId}`);
                 console.log(`   Descrizione: ${channel.description || 'Nessuna descrizione'}`);
                 console.log(`   Messaggi non letti: ${channel.unreadCount || 0}`);
                 console.log(
@@ -475,7 +443,12 @@ async function logWhatsAppChannels() {
                 console.log(`   Mutato: ${channel.isMuted ? 'Sì' : 'No'}`);
                 console.log(`   Solo lettura: ${channel.isReadOnly ? 'Sì' : 'No'}`);
 
-                // Controllo specifico per canali con nomi relativi a prezzi/offerte
+                // Indica se è il canale target configurato
+                if (channelId === WHATSAPP_CHANNEL_ID) {
+                    console.log(`   🎯 CANALE TARGET CONFIGURATO! ✅`);
+                }
+
+                // Controllo per canali con nomi relativi a prezzi/offerte
                 const channelName = (channel.name || '').toLowerCase();
                 if (
                     channelName.includes('prezzi') ||
@@ -485,7 +458,7 @@ async function logWhatsAppChannels() {
                     console.log(`   🎯 CANALE TARGET POTENZIALE! (contiene parole chiave)`);
                 }
 
-                // Tenta di ottenere i subscriber (solo quelli nei contatti)
+                // Tenta di ottenere i subscriber
                 try {
                     const subscribers = await channel.getSubscribers(10);
                     console.log(
@@ -510,64 +483,19 @@ async function logWhatsAppChannels() {
             console.log('\n❌ Nessun canale trovato.');
         }
 
-        // Log dei gruppi
-        if (groups.length > 0) {
-            console.log('\n👥 GRUPPI WHATSAPP:');
-            for (let i = 0; i < Math.min(groups.length, 10); i++) {
-                // Limita a primi 10 gruppi
-                const group = groups[i];
-
-                console.log(`\n👥 GRUPPO ${i + 1}:`);
-                console.log(`   Nome: ${group.name || 'N/A'}`);
-                console.log(`   ID: ${group.id._serialized || group.id}`);
-                console.log(`   Messaggi non letti: ${group.unreadCount || 0}`);
-                console.log(
-                    `   Ultimo messaggio: ${
-                        group.timestamp
-                            ? new Date(group.timestamp * 1000).toLocaleString('it-IT')
-                            : 'N/A'
-                    }`,
-                );
-                console.log(`   Mutato: ${group.isMuted ? 'Sì' : 'No'}`);
-
-                // Controllo specifico per gruppi con nomi relativi a prezzi/offerte
-                const groupName = (group.name || '').toLowerCase();
-                if (
-                    groupName.includes('prezzi') ||
-                    groupName.includes('offerte') ||
-                    groupName.includes('sconti')
-                ) {
-                    console.log(`   🎯 GRUPPO TARGET POTENZIALE! (contiene parole chiave)`);
-                }
-
-                console.log('   ───────────────────────────');
-            }
-
-            if (groups.length > 10) {
-                console.log(`\n... e altri ${groups.length - 10} gruppi`);
-            }
-        } else {
-            console.log('\n❌ Nessun gruppo trovato.');
-        }
-
-        console.log('\n🎯 CONFIGURAZIONE PER PREZZI WOW:');
-        console.log('Per il canale: https://whatsapp.com/channel/0029VbB3yxmCRs1wf42e1Q2J');
-        console.log('1. Trova il canale/gruppo corretto nella lista sopra');
-        console.log("2. Copia l'ID completo (es: 120363...@g.us)");
-        console.log('3. Aggiungi come: WHATSAPP_GROUP_ID=120363...@g.us');
-        console.log('4. IMPORTANTE: Per i canali devi essere PROPRIETARIO per inviare messaggi!');
-        console.log('\n💡 ALTERNATIVE:');
-        console.log('- Usa un GRUPPO WhatsApp invece di un canale (più flessibile)');
-        console.log('- Crea un nuovo gruppo "Prezzi WOW" se non trovi quello giusto');
-        console.log('- Usa la tua chat personale: numero@c.us (es: 393123456789@c.us)');
+        console.log('\n🎯 CONFIGURAZIONE ATTUALE:');
+        console.log(`Canale target: ${WHATSAPP_CHANNEL_ID}`);
+        console.log('Per modificare il canale target, aggiorna WHATSAPP_CHANNEL_ID');
+        console.log('IMPORTANTE: Devi essere PROPRIETARIO del canale per inviare messaggi!');
         console.log('═══════════════════════════════════════\n');
     } catch (error) {
-        console.error('❌ Errore nel recupero dei canali e gruppi WhatsApp:', error);
+        console.error('❌ Errore nel recupero dei canali WhatsApp:', error);
     }
 }
 
 // Avvia il sistema
 console.log('🚀 Avviando il sistema...');
+console.log(`🎯 Canale WhatsApp target: ${WHATSAPP_CHANNEL_ID}`);
 
 // Avvia Express server
 app.listen(PORT, () => {
