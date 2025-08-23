@@ -1,18 +1,21 @@
+---
 services:
   - type: web
-    name: telegram-whatsapp-bridge
+    name: telegram-whatsapp-forwarder
     env: node
-    plan: free
-    buildCommand: npm ci && npm run build
+    plan: starter
+    buildCommand: npm install
     startCommand: npm start
     envVars:
       - key: NODE_ENV
         value: production
-    # Add Chrome buildpack for Puppeteer
-    buildCommand: |
-      # Install Chrome
-      wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add -
-      echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list
-      apt-get update
-      apt-get install -y google-chrome-unstable fonts-ipafont-gothic fonts-wqy-zenhei fonts-thai-tlwg fonts-kacst fonts-freefont-ttf libxss1 --no-install-recommends
-      npm ci && npm run build
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHANNEL_ID
+        sync: false
+      - key: WHATSAPP_GROUP_ID
+        sync: false
+    disk:
+      name: whatsapp-session
+      mountPath: /opt/render/project/src/whatsapp_session
+      sizeGB: 1

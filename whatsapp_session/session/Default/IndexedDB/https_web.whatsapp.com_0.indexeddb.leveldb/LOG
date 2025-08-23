@@ -1,0 +1,26 @@
+2025/08/23-13:47:48.774 bc5d Reusing MANIFEST /home/adolf/Scrivania/test-prezzi-wow/whatsapp_session/session/Default/IndexedDB/https_web.whatsapp.com_0.indexeddb.leveldb/MANIFEST-000001
+2025/08/23-13:47:48.774 bc5d Recovering log #187
+2025/08/23-13:47:48.777 bc5d Reusing old log /home/adolf/Scrivania/test-prezzi-wow/whatsapp_session/session/Default/IndexedDB/https_web.whatsapp.com_0.indexeddb.leveldb/000187.log 
+2025/08/23-13:47:50.195 bc5c Level-0 table #194: started
+2025/08/23-13:47:50.197 bc5c Level-0 table #194: 51995 bytes OK
+2025/08/23-13:47:50.199 bc5c Delete type=0 #187
+2025/08/23-13:47:50.200 bc5c Manual compaction at level-0 from '\x00 \x00\x00\x00' @ 72057594037927935 : 1 .. '\x00!\x00\x00\x00' @ 0 : 0; will stop at (end)
+2025/08/23-13:47:52.278 bc2a Compacting 1@1 + 3@2 files
+2025/08/23-13:47:52.343 bc2a Generated table #195@1: 60160 keys, 2221179 bytes
+2025/08/23-13:47:52.405 bc2a Generated table #196@1: 36760 keys, 2211691 bytes
+2025/08/23-13:47:52.465 bc2a Generated table #197@1: 26895 keys, 1637956 bytes
+2025/08/23-13:47:52.465 bc2a Compacted 1@1 + 3@2 files => 6070826 bytes
+2025/08/23-13:47:52.468 bc2a compacted to: files[ 0 0 3 0 0 0 0 ]
+2025/08/23-13:47:52.468 bc2a Delete type=2 #189
+2025/08/23-13:47:52.468 bc2a Delete type=2 #190
+2025/08/23-13:47:52.468 bc2a Delete type=2 #191
+2025/08/23-13:47:52.468 bc2a Delete type=2 #194
+2025/08/23-13:47:59.786 bc60 Level-0 table #199: started
+2025/08/23-13:47:59.808 bc60 Level-0 table #199: 1047941 bytes OK
+2025/08/23-13:47:59.809 bc60 Delete type=0 #193
+2025/08/23-13:47:59.810 bc60 Compacting 1@1 + 3@2 files
+2025/08/23-13:47:59.872 bc60 Generated table #200@1: 63341 keys, 2222604 bytes
+2025/08/23-13:47:59.923 bc60 Generated table #201@1: 39319 keys, 2217001 bytes
+2025/08/23-13:47:59.954 bc60 Generated table #202@1: 27109 keys, 1782556 bytes
+2025/08/23-13:47:59.954 bc60 Compacted 1@1 + 3@2 files => 6222161 bytes
+2025/08/23-13:47:59.955 bc60 compacted to: files[ 0 0 3 0 0 0 0 ]
