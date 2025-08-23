@@ -2,8 +2,7 @@ const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const { Telegraf } = require('telegraf');
 const express = require('express');
 const QRCode = require('qrcode');
-const fs = require('fs-extra');
-const path = require('path');
+
 require('dotenv').config();
 
 // Configurazione
@@ -234,22 +233,13 @@ function initWhatsApp() {
 
     whatsappClient.on('disconnected', (reason) => {
         console.log('⚠️ WhatsApp disconnesso:', reason);
-        console.log('🔄 Tentativo di riconnessione in corso...');
         isWhatsAppReady = false;
-
-        // Tentativo di riconnessione dopo 10 secondi
-        setTimeout(() => {
-            if (!isWhatsAppReady) {
-                console.log('🔄 Riinizializzo WhatsApp Client...');
-                whatsappClient.initialize();
-            }
-        }, 10000);
     });
 
     whatsappClient.initialize();
 }
 
-// Inizializza Telegram Bot con configurazione più aggressiva
+// Inizializza Telegram Bot
 function initTelegram() {
     if (!TELEGRAM_BOT_TOKEN) {
         console.error('❌ TELEGRAM_BOT_TOKEN non configurato');
@@ -258,291 +248,163 @@ function initTelegram() {
 
     const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
 
-    // CATTURA QUALSIASI TIPO DI AGGIORNAMENTO - FOCUS SU WP TELEGRAM PRO
-    bot.use(async (ctx, next) => {
-        console.log('🔍 === AGGIORNAMENTO RICEVUTO ===');
-        console.log('Timestamp:', new Date().toISOString());
-        console.log('Update type:', ctx.updateType);
-
-        // Log specifico per WP Telegram Pro
-        if (ctx.update.message) {
-            console.log('📱 MESSAGE detected (possibile WP Telegram Pro)');
-            console.log('Chat type:', ctx.update.message.chat.type);
-            console.log('Chat ID:', ctx.update.message.chat.id);
-            console.log('From bot:', ctx.update.message.from?.is_bot);
-            console.log('From username:', ctx.update.message.from?.username);
-        }
-
-        if (ctx.update.channel_post) {
-            console.log('📺 CHANNEL_POST detected');
-        }
-
-        // Log completo solo se necessario per debug
-        if (process.env.DEBUG_FULL) {
-            console.log('Raw update:', JSON.stringify(ctx.update, null, 2));
-        }
-
-        console.log('=====================================');
-        return next();
-    });
-
-    // Gestione channel_post (messaggi normali del canale)
+    // Gestione messaggi dal canale Telegram
     bot.on('channel_post', async (ctx) => {
-        console.log('📨 CHANNEL_POST ricevuto');
-        await handleChannelMessage(ctx, ctx.channelPost, 'channel_post');
-    });
-
-    // Gestione edited_channel_post (messaggi modificati)
-    bot.on('edited_channel_post', async (ctx) => {
-        console.log('📝 EDITED_CHANNEL_POST ricevuto');
-        await handleChannelMessage(ctx, ctx.editedChannelPost, 'edited_channel_post');
-    });
-
-    // *** NUOVO *** Gestione messaggi da WP Telegram Pro
-    bot.on('message', async (ctx) => {
-        const message = ctx.message;
-        const chatType = message.chat.type;
-        const chatId = message.chat.id.toString();
-        const isBot = message.from?.is_bot;
-        const fromUsername = message.from?.username;
-
-        console.log('💬 MESSAGE ricevuto');
-        console.log(`   Chat type: ${chatType}`);
-        console.log(`   Chat ID: ${chatId}`);
-        console.log(`   From bot: ${isBot}`);
-        console.log(`   From username: ${fromUsername}`);
-
-        // WP Telegram Pro spesso invia come 'supergroup' o 'channel' ma tramite 'message'
-        if (chatType === 'channel' || chatType === 'supergroup') {
-            console.log(
-                '🎯 Possibile messaggio da WP Telegram Pro (channel/supergroup via message)',
-            );
-
-            // Verifica se è dal canale giusto
-            const shouldProcess =
-                !TELEGRAM_CHANNEL_ID ||
-                chatId === TELEGRAM_CHANNEL_ID ||
-                message.chat.username === 'prezzi_wow';
-
-            if (shouldProcess) {
-                console.log('✅ Processando messaggio come channel_post da WP Telegram Pro');
-                await handleChannelMessage(ctx, message, 'wp_telegram_message');
-            } else {
-                console.log('❌ Messaggio ignorato - canale non corrispondente');
-            }
-        } else if (chatType === 'private') {
-            // Messaggio privato per testing
-            await handlePrivateMessage(ctx);
-        } else {
-            console.log(`📝 Messaggio di tipo ${chatType} ignorato`);
-        }
-    });
-
-    // Funzione per messaggi privati (testing)
-    async function handlePrivateMessage(ctx) {
-        if (!isWhatsAppReady) {
-            ctx.reply('⚠️ WhatsApp non ancora connesso');
-            return;
-        }
-
-        if (ctx.message.text === '/status') {
-            const statusMsg = `📊 Status Sistema:
-WhatsApp: ${isWhatsAppReady ? '✅ Connesso' : '❌ Disconnesso'}
-Canale monitorato: ${TELEGRAM_CHANNEL_ID || 'Auto-detect'}
-Canale WhatsApp: ${WHATSAPP_CHANNEL_ID}
-
-🔧 Modalità: Compatibile WP Telegram Pro`;
-            ctx.reply(statusMsg);
-            return;
-        }
-
-        if (ctx.message.text === '/channels') {
-            if (!isWhatsAppReady) {
-                ctx.reply('⚠️ WhatsApp non ancora connesso. Attendere...');
-                return;
-            }
-
-            ctx.reply('🔍 Recuperando lista canali WhatsApp...');
-            await logWhatsAppChannels();
-            ctx.reply("✅ Lista canali disponibile all'endpoint /channels");
-            return;
-        }
-
-        // Test di inoltro per messaggi privati
-        try {
-            await forwardToWhatsApp(ctx.message);
-            ctx.reply('✅ Messaggio inoltrato sul canale WhatsApp');
-        } catch (error) {
-            ctx.reply("❌ Errore nell'inoltro: " + error.message);
-        }
-    }
-
-    // Funzione per gestire i messaggi del canale
-    async function handleChannelMessage(ctx, message, updateType) {
-        console.log(`🔄 === ${updateType.toUpperCase()} DAL CANALE ===`);
-        console.log(`⏰ Timestamp: ${new Date().toISOString()}`);
-
-        if (!message) {
-            console.log('❌ Messaggio undefined/null');
-            console.log('=====================================');
-            return;
-        }
-
         if (!isWhatsAppReady) {
             console.log('⚠️ WhatsApp non ancora pronto, messaggio ignorato');
-            console.log('=====================================');
             return;
         }
 
-        const channelId = message.chat?.id?.toString();
-        const channelUsername = message.chat?.username;
-        const messageId = message.message_id;
+        const message = ctx.channelPost;
+        console.log('📬 Nuovo messaggio dal canale Telegram:', ctx);
+        console.log('📬Caption Entititeis:', ctx.channelPost.caption_entities);
+        console.log('📬Reply Markup:', ctx.channelPost.reply_markup);
 
-        console.log(`📨 Dettagli messaggio:`);
-        console.log(`   - Canale: @${channelUsername || 'unknown'} (ID: ${channelId})`);
-        console.log(`   - Message ID: ${messageId}`);
-        console.log(
-            `   - Da: ${
-                message.from
-                    ? message.from.first_name || message.from.username || message.from.is_bot
-                        ? 'Bot'
-                        : 'User'
-                    : 'Sistema'
-            }`,
-        );
-        console.log(`   - Tipo: ${getMessageType(message)}`);
-        console.log(`   - Update Type: ${updateType}`);
+        const channelUsername = message.chat.username;
 
-        // Log extra per WP Telegram Pro
-        if (updateType === 'wp_telegram_message') {
-            console.log(`   🚀 RILEVATO: Messaggio da WP Telegram Pro!`);
-            console.log(`   - Chat Type: ${message.chat?.type}`);
-            console.log(`   - Is Bot: ${message.from?.is_bot}`);
-        }
-
-        // Verifica canale autorizzato - ACCETTA TUTTO SE NON SPECIFICATO
-        if (TELEGRAM_CHANNEL_ID && channelId && channelId !== TELEGRAM_CHANNEL_ID) {
-            console.log(`⚠️ Messaggio ignorato - canale non autorizzato`);
-            console.log(`   - Atteso: ${TELEGRAM_CHANNEL_ID}`);
-            console.log(`   - Ricevuto: ${channelId}`);
-            console.log('=====================================');
-            return;
-        }
-
-        // Se non è configurato un canale specifico E abbiamo username, verifica @prezzi_wow
-        if (!TELEGRAM_CHANNEL_ID && channelUsername && channelUsername !== 'prezzi_wow') {
-            console.log(`⚠️ Messaggio ignorato - non proviene da @prezzi_wow`);
-            console.log(`   - Username: @${channelUsername}`);
-            console.log('=====================================');
-            return;
-        }
-
-        // Se non abbiamo né TELEGRAM_CHANNEL_ID né username, accetta tutto (modalità debug)
-        if (!TELEGRAM_CHANNEL_ID && !channelUsername) {
-            console.log(`⚠️ MODALITA DEBUG - Accetto messaggio senza verifica canale`);
-        }
-
-        // Log dell'ID del canale per configurazione futura
-        if (!TELEGRAM_CHANNEL_ID && channelId) {
-            console.log(`💡 ID del canale: ${channelId}`);
-            console.log('   Puoi aggiungerlo come TELEGRAM_CHANNEL_ID per maggiore sicurezza');
-        }
+        console.log(`📨 Messaggio ricevuto dal canale: @${channelUsername || 'unknown'}`);
 
         try {
-            console.log(`🎯 INOLTRO IN CORSO...`);
-            console.log(`   - Testo: ${message.text ? 'SI' : 'NO'}`);
-            console.log(`   - Caption: ${message.caption ? 'SI' : 'NO'}`);
-            console.log(`   - Foto: ${message.photo ? 'SI' : 'NO'}`);
-            console.log(`   - Video: ${message.video ? 'SI' : 'NO'}`);
-            console.log(`   - Documento: ${message.document ? 'SI' : 'NO'}`);
-
+            console.log(`🎯 Inoltrando messaggio da @${channelUsername} verso canale WhatsApp...`);
             await forwardToWhatsApp(message);
-            console.log('✅ MESSAGGIO INOLTRATO CON SUCCESSO');
+            console.log('✅ Messaggio inoltrato con successo su WhatsApp');
         } catch (error) {
-            console.error("❌ ERRORE NELL'INOLTRO:", error.message);
-            console.error('Stack trace:', error.stack);
+            console.error("❌ Errore nell'inoltro del messaggio:", error);
 
+            // Se l'errore contiene un ID, probabilmente è quello del canale giusto
             if (error.message && error.message.includes('@newsletter')) {
-                console.log("💡 Verifica l'ID del canale WhatsApp nelle variabili d'ambiente");
+                console.log(
+                    "💡 SUGGERIMENTO: L'ID nel messaggio di errore potrebbe essere quello corretto da usare come WHATSAPP_CHANNEL_ID",
+                );
             }
-        }
-
-        console.log('=====================================');
-    }
-
-    // Funzione per determinare il tipo di messaggio
-    function getMessageType(message) {
-        if (message.photo) return 'Foto';
-        if (message.video) return 'Video';
-        if (message.document) return 'Documento';
-        if (message.text) return 'Testo';
-        if (message.caption) return 'Media con caption';
-        if (message.sticker) return 'Sticker';
-        if (message.animation) return 'GIF';
-        if (message.voice) return 'Messaggio vocale';
-        if (message.audio) return 'Audio';
-        if (message.location) return 'Posizione';
-        if (message.contact) return 'Contatto';
-        if (message.poll) return 'Sondaggio';
-        return 'Altro';
-    }
-
-    // Gestione messaggi privati (per testing)
-    bot.on('text', async (ctx) => {
-        if (!isWhatsAppReady) {
-            ctx.reply('⚠️ WhatsApp non ancora connesso');
-            return;
-        }
-
-        if (ctx.message.text === '/status') {
-            const statusMsg = `📊 Status Sistema Prezzi WOW:
-WhatsApp: ${isWhatsAppReady ? '✅ Connesso' : '❌ Disconnesso'}
-Canale monitorato: @prezzi_wow ${
-                TELEGRAM_CHANNEL_ID ? `(ID: ${TELEGRAM_CHANNEL_ID})` : '(Auto-detect)'
-            }
-Canale WhatsApp: ${WHATSAPP_CHANNEL_ID}
-
-🔧 Per testare il sistema:
-1. Invia un messaggio di test
-2. Controlla i logs per conferma invio`;
-            ctx.reply(statusMsg);
-            return;
-        }
-
-        if (ctx.message.text === '/channels') {
-            if (!isWhatsAppReady) {
-                ctx.reply('⚠️ WhatsApp non ancora connesso. Attendere...');
-                return;
-            }
-
-            ctx.reply('🔍 Recuperando lista canali WhatsApp...');
-            await logWhatsAppChannels();
-            ctx.reply("✅ Lista canali disponibile all'endpoint /channels");
-            return;
-        }
-
-        // Test di inoltro per messaggi privati
-        try {
-            await forwardToWhatsApp(ctx.message);
-            ctx.reply('✅ Messaggio inoltrato sul canale WhatsApp');
-        } catch (error) {
-            ctx.reply("❌ Errore nell'inoltro: " + error.message);
         }
     });
 
-    bot.launch({
-        allowedUpdates: [], // ACCETTA TUTTI gli aggiornamenti possibili
-    });
-    console.log('🤖 Telegram Bot avviato in MODALITA COMPLETA');
-    console.log('🔄 Bot configurato per ricevere TUTTI i tipi di aggiornamento');
-    console.log('🎯 Monitorando qualsiasi attività sul canale...');
+    bot.launch();
+    console.log('🤖 Telegram Bot avviato');
 
     // Graceful stop
     process.once('SIGINT', () => bot.stop('SIGINT'));
     process.once('SIGTERM', () => bot.stop('SIGTERM'));
 }
 
-// Funzione per inoltrare messaggi al canale WhatsApp
+// Funzione avanzata per gestire entità sovrapposte e spoiler
+function convertTelegramFormatting(text, entities) {
+    if (!entities || entities.length === 0) {
+        return text;
+    }
+
+    console.log('📝 Entità ricevute:', JSON.stringify(entities, null, 2));
+
+    // Crea una mappa di posizioni con le formattazioni
+    const formatMap = new Map();
+
+    // Prima passa: identifica tutte le posizioni e i tipi di formattazione
+    for (const entity of entities) {
+        const start = entity.offset;
+        const end = entity.offset + entity.length;
+
+        for (let i = start; i < end; i++) {
+            if (!formatMap.has(i)) {
+                formatMap.set(i, new Set());
+            }
+
+            // Gestisci i tipi supportati
+            switch (entity.type) {
+                case 'bold':
+                    formatMap.get(i).add('bold');
+                    break;
+                case 'italic':
+                    formatMap.get(i).add('italic');
+                    break;
+                case 'strikethrough':
+                    formatMap.get(i).add('strikethrough');
+                    break;
+                case 'code':
+                    formatMap.get(i).add('code');
+                    break;
+                // case 'underline':
+                //     // Converti underline in italic per WhatsApp
+                //     formatMap.get(i).add('italic');
+                //     break;
+                case 'spoiler':
+                    // Mantieni spoiler come testo normale per ora
+                    formatMap.get(i).add('spoiler');
+                    break;
+            }
+        }
+    }
+
+    // Seconda passa: applica la formattazione
+    let result = '';
+    let currentFormats = new Set();
+    let openTags = [];
+
+    for (let i = 0; i < text.length; i++) {
+        const char = text[i];
+        const newFormats = formatMap.get(i) || new Set();
+
+        // Chiudi i tag che non sono più attivi
+        const toClose = [...currentFormats].filter((f) => !newFormats.has(f));
+        for (const format of toClose.reverse()) {
+            if (format === 'bold') result += '*';
+            else if (format === 'italic') result += '_';
+            else if (format === 'strikethrough') result += '~';
+            else if (format === 'code') result += '`';
+
+            openTags = openTags.filter((tag) => tag !== format);
+            currentFormats.delete(format);
+        }
+
+        // Apri i nuovi tag
+        const toOpen = [...newFormats].filter((f) => !currentFormats.has(f) && f !== 'spoiler');
+        for (const format of toOpen) {
+            if (format === 'bold') result += '*';
+            else if (format === 'italic') result += '_';
+            else if (format === 'strikethrough') result += '~';
+            else if (format === 'code') result += '`';
+
+            openTags.push(format);
+            currentFormats.add(format);
+        }
+
+        result += char;
+    }
+
+    // Chiudi tutti i tag rimasti aperti
+    for (const format of openTags.reverse()) {
+        if (format === 'bold') result += '*';
+        else if (format === 'italic') result += '_';
+        else if (format === 'strikethrough') result += '~';
+        else if (format === 'code') result += '`';
+    }
+
+    console.log('📝 Testo formattato:', result);
+    return result;
+}
+
+// Funzione per debug delle entità
+function debugTelegramMessage(telegramMessage) {
+    console.log('📬 Caption:', telegramMessage.caption);
+    console.log('📬 Caption Entities:', JSON.stringify(telegramMessage.caption_entities, null, 2));
+
+    if (telegramMessage.caption_entities) {
+        console.log('📬 Analisi entità:');
+        telegramMessage.caption_entities.forEach((entity, index) => {
+            const text = telegramMessage.caption.substring(
+                entity.offset,
+                entity.offset + entity.length,
+            );
+            console.log(
+                `  ${index + 1}. "${text}" → ${entity.type} (${entity.offset}-${
+                    entity.offset + entity.length
+                })`,
+            );
+        });
+    }
+}
+
+// Modifica la funzione forwardToWhatsApp per utilizzare la formattazione
 async function forwardToWhatsApp(telegramMessage) {
     if (!whatsappClient || !isWhatsAppReady) {
         throw new Error('WhatsApp client non pronto');
@@ -551,27 +413,33 @@ async function forwardToWhatsApp(telegramMessage) {
     let content = '';
     let media = null;
 
-    // Gestione testo
-    if (telegramMessage.text) {
-        content = telegramMessage.text;
+    // Debug del messaggio ricevuto
+    if (telegramMessage.caption || telegramMessage.text) {
+        debugTelegramMessage(telegramMessage);
     }
 
-    // Gestione caption per media
+    // Gestione testo con formattazione
+    if (telegramMessage.text) {
+        content = convertTelegramFormatting(telegramMessage.text, telegramMessage.entities);
+    }
+
+    // Gestione caption per media con formattazione
     if (telegramMessage.caption) {
-        content = telegramMessage.caption;
+        content = convertTelegramFormatting(
+            telegramMessage.caption,
+            telegramMessage.caption_entities,
+        );
     }
 
     // Gestione foto - Debug per le immagini
     if (telegramMessage.photo) {
         console.log('📸 Immagine rilevata:', telegramMessage.photo);
         try {
-            // Prendi la foto con la risoluzione più alta
             const photo = telegramMessage.photo[telegramMessage.photo.length - 1];
             console.log('📸 Foto selezionata:', photo);
             const fileUrl = await getFileUrl(photo.file_id);
             console.log('📸 URL file:', fileUrl);
 
-            // Prova diversi metodi per caricare l'immagine
             console.log('📸 Tentativo di creazione MessageMedia...');
             media = await MessageMedia.fromUrl(fileUrl, {
                 unsafeMime: true,
@@ -621,6 +489,11 @@ async function forwardToWhatsApp(telegramMessage) {
     // Invia al canale WhatsApp configurato
     const channelId = WHATSAPP_CHANNEL_ID;
     console.log(`📤 Invio a canale: ${channelId}`);
+
+    // Debug: mostra il testo formattato
+    if (content) {
+        console.log('📝 Testo con formattazione:', content);
+    }
 
     try {
         // Invia il messaggio
