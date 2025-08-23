@@ -234,13 +234,22 @@ function initWhatsApp() {
 
     whatsappClient.on('disconnected', (reason) => {
         console.log('⚠️ WhatsApp disconnesso:', reason);
+        console.log('🔄 Tentativo di riconnessione in corso...');
         isWhatsAppReady = false;
+
+        // Tentativo di riconnessione dopo 10 secondi
+        setTimeout(() => {
+            if (!isWhatsAppReady) {
+                console.log('🔄 Riinizializzo WhatsApp Client...');
+                whatsappClient.initialize();
+            }
+        }, 10000);
     });
 
     whatsappClient.initialize();
 }
 
-// Inizializza Telegram Bot
+// Inizializza Telegram Bot con configurazione più aggressiva
 function initTelegram() {
     if (!TELEGRAM_BOT_TOKEN) {
         console.error('❌ TELEGRAM_BOT_TOKEN non configurato');
@@ -249,53 +258,234 @@ function initTelegram() {
 
     const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
 
-    // Gestione messaggi dal canale Telegram
+    // CATTURA QUALSIASI TIPO DI AGGIORNAMENTO - FOCUS SU WP TELEGRAM PRO
+    bot.use(async (ctx, next) => {
+        console.log('🔍 === AGGIORNAMENTO RICEVUTO ===');
+        console.log('Timestamp:', new Date().toISOString());
+        console.log('Update type:', ctx.updateType);
+
+        // Log specifico per WP Telegram Pro
+        if (ctx.update.message) {
+            console.log('📱 MESSAGE detected (possibile WP Telegram Pro)');
+            console.log('Chat type:', ctx.update.message.chat.type);
+            console.log('Chat ID:', ctx.update.message.chat.id);
+            console.log('From bot:', ctx.update.message.from?.is_bot);
+            console.log('From username:', ctx.update.message.from?.username);
+        }
+
+        if (ctx.update.channel_post) {
+            console.log('📺 CHANNEL_POST detected');
+        }
+
+        // Log completo solo se necessario per debug
+        if (process.env.DEBUG_FULL) {
+            console.log('Raw update:', JSON.stringify(ctx.update, null, 2));
+        }
+
+        console.log('=====================================');
+        return next();
+    });
+
+    // Gestione channel_post (messaggi normali del canale)
     bot.on('channel_post', async (ctx) => {
+        console.log('📨 CHANNEL_POST ricevuto');
+        await handleChannelMessage(ctx, ctx.channelPost, 'channel_post');
+    });
+
+    // Gestione edited_channel_post (messaggi modificati)
+    bot.on('edited_channel_post', async (ctx) => {
+        console.log('📝 EDITED_CHANNEL_POST ricevuto');
+        await handleChannelMessage(ctx, ctx.editedChannelPost, 'edited_channel_post');
+    });
+
+    // *** NUOVO *** Gestione messaggi da WP Telegram Pro
+    bot.on('message', async (ctx) => {
+        const message = ctx.message;
+        const chatType = message.chat.type;
+        const chatId = message.chat.id.toString();
+        const isBot = message.from?.is_bot;
+        const fromUsername = message.from?.username;
+
+        console.log('💬 MESSAGE ricevuto');
+        console.log(`   Chat type: ${chatType}`);
+        console.log(`   Chat ID: ${chatId}`);
+        console.log(`   From bot: ${isBot}`);
+        console.log(`   From username: ${fromUsername}`);
+
+        // WP Telegram Pro spesso invia come 'supergroup' o 'channel' ma tramite 'message'
+        if (chatType === 'channel' || chatType === 'supergroup') {
+            console.log(
+                '🎯 Possibile messaggio da WP Telegram Pro (channel/supergroup via message)',
+            );
+
+            // Verifica se è dal canale giusto
+            const shouldProcess =
+                !TELEGRAM_CHANNEL_ID ||
+                chatId === TELEGRAM_CHANNEL_ID ||
+                message.chat.username === 'prezzi_wow';
+
+            if (shouldProcess) {
+                console.log('✅ Processando messaggio come channel_post da WP Telegram Pro');
+                await handleChannelMessage(ctx, message, 'wp_telegram_message');
+            } else {
+                console.log('❌ Messaggio ignorato - canale non corrispondente');
+            }
+        } else if (chatType === 'private') {
+            // Messaggio privato per testing
+            await handlePrivateMessage(ctx);
+        } else {
+            console.log(`📝 Messaggio di tipo ${chatType} ignorato`);
+        }
+    });
+
+    // Funzione per messaggi privati (testing)
+    async function handlePrivateMessage(ctx) {
+        if (!isWhatsAppReady) {
+            ctx.reply('⚠️ WhatsApp non ancora connesso');
+            return;
+        }
+
+        if (ctx.message.text === '/status') {
+            const statusMsg = `📊 Status Sistema:
+WhatsApp: ${isWhatsAppReady ? '✅ Connesso' : '❌ Disconnesso'}
+Canale monitorato: ${TELEGRAM_CHANNEL_ID || 'Auto-detect'}
+Canale WhatsApp: ${WHATSAPP_CHANNEL_ID}
+
+🔧 Modalità: Compatibile WP Telegram Pro`;
+            ctx.reply(statusMsg);
+            return;
+        }
+
+        if (ctx.message.text === '/channels') {
+            if (!isWhatsAppReady) {
+                ctx.reply('⚠️ WhatsApp non ancora connesso. Attendere...');
+                return;
+            }
+
+            ctx.reply('🔍 Recuperando lista canali WhatsApp...');
+            await logWhatsAppChannels();
+            ctx.reply("✅ Lista canali disponibile all'endpoint /channels");
+            return;
+        }
+
+        // Test di inoltro per messaggi privati
+        try {
+            await forwardToWhatsApp(ctx.message);
+            ctx.reply('✅ Messaggio inoltrato sul canale WhatsApp');
+        } catch (error) {
+            ctx.reply("❌ Errore nell'inoltro: " + error.message);
+        }
+    }
+
+    // Funzione per gestire i messaggi del canale
+    async function handleChannelMessage(ctx, message, updateType) {
+        console.log(`🔄 === ${updateType.toUpperCase()} DAL CANALE ===`);
+        console.log(`⏰ Timestamp: ${new Date().toISOString()}`);
+
+        if (!message) {
+            console.log('❌ Messaggio undefined/null');
+            console.log('=====================================');
+            return;
+        }
+
         if (!isWhatsAppReady) {
             console.log('⚠️ WhatsApp non ancora pronto, messaggio ignorato');
+            console.log('=====================================');
             return;
         }
 
-        const message = ctx.channelPost;
-        const channelId = message.chat.id.toString();
-        const channelUsername = message.chat.username;
+        const channelId = message.chat?.id?.toString();
+        const channelUsername = message.chat?.username;
+        const messageId = message.message_id;
 
+        console.log(`📨 Dettagli messaggio:`);
+        console.log(`   - Canale: @${channelUsername || 'unknown'} (ID: ${channelId})`);
+        console.log(`   - Message ID: ${messageId}`);
         console.log(
-            `📨 Messaggio ricevuto dal canale: @${channelUsername || 'unknown'} (ID: ${channelId})`,
+            `   - Da: ${
+                message.from
+                    ? message.from.first_name || message.from.username || message.from.is_bot
+                        ? 'Bot'
+                        : 'User'
+                    : 'Sistema'
+            }`,
         );
+        console.log(`   - Tipo: ${getMessageType(message)}`);
+        console.log(`   - Update Type: ${updateType}`);
 
-        // Verifica se il messaggio proviene dal canale @prezzi_wow
-        if (
-            channelUsername !== 'prezzi_wow' &&
-            TELEGRAM_CHANNEL_ID &&
-            channelId !== TELEGRAM_CHANNEL_ID
-        ) {
-            console.log(`⚠️ Messaggio ignorato - non proviene da @prezzi_wow`);
+        // Log extra per WP Telegram Pro
+        if (updateType === 'wp_telegram_message') {
+            console.log(`   🚀 RILEVATO: Messaggio da WP Telegram Pro!`);
+            console.log(`   - Chat Type: ${message.chat?.type}`);
+            console.log(`   - Is Bot: ${message.from?.is_bot}`);
+        }
+
+        // Verifica canale autorizzato - ACCETTA TUTTO SE NON SPECIFICATO
+        if (TELEGRAM_CHANNEL_ID && channelId && channelId !== TELEGRAM_CHANNEL_ID) {
+            console.log(`⚠️ Messaggio ignorato - canale non autorizzato`);
+            console.log(`   - Atteso: ${TELEGRAM_CHANNEL_ID}`);
+            console.log(`   - Ricevuto: ${channelId}`);
+            console.log('=====================================');
             return;
         }
 
-        // Log dell'ID del canale per configurazione futura se necessario
-        if (!TELEGRAM_CHANNEL_ID) {
-            console.log(
-                `💡 ID del canale @prezzi_wow: ${channelId} - Puoi aggiungerlo come TELEGRAM_CHANNEL_ID se vuoi essere più specifico`,
-            );
+        // Se non è configurato un canale specifico E abbiamo username, verifica @prezzi_wow
+        if (!TELEGRAM_CHANNEL_ID && channelUsername && channelUsername !== 'prezzi_wow') {
+            console.log(`⚠️ Messaggio ignorato - non proviene da @prezzi_wow`);
+            console.log(`   - Username: @${channelUsername}`);
+            console.log('=====================================');
+            return;
+        }
+
+        // Se non abbiamo né TELEGRAM_CHANNEL_ID né username, accetta tutto (modalità debug)
+        if (!TELEGRAM_CHANNEL_ID && !channelUsername) {
+            console.log(`⚠️ MODALITA DEBUG - Accetto messaggio senza verifica canale`);
+        }
+
+        // Log dell'ID del canale per configurazione futura
+        if (!TELEGRAM_CHANNEL_ID && channelId) {
+            console.log(`💡 ID del canale: ${channelId}`);
+            console.log('   Puoi aggiungerlo come TELEGRAM_CHANNEL_ID per maggiore sicurezza');
         }
 
         try {
-            console.log(`🎯 Inoltrando messaggio da @${channelUsername} verso canale WhatsApp...`);
-            await forwardToWhatsApp(message);
-            console.log('✅ Messaggio inoltrato con successo su WhatsApp');
-        } catch (error) {
-            console.error("❌ Errore nell'inoltro del messaggio:", error);
+            console.log(`🎯 INOLTRO IN CORSO...`);
+            console.log(`   - Testo: ${message.text ? 'SI' : 'NO'}`);
+            console.log(`   - Caption: ${message.caption ? 'SI' : 'NO'}`);
+            console.log(`   - Foto: ${message.photo ? 'SI' : 'NO'}`);
+            console.log(`   - Video: ${message.video ? 'SI' : 'NO'}`);
+            console.log(`   - Documento: ${message.document ? 'SI' : 'NO'}`);
 
-            // Se l'errore contiene un ID, probabilmente è quello del canale giusto
+            await forwardToWhatsApp(message);
+            console.log('✅ MESSAGGIO INOLTRATO CON SUCCESSO');
+        } catch (error) {
+            console.error("❌ ERRORE NELL'INOLTRO:", error.message);
+            console.error('Stack trace:', error.stack);
+
             if (error.message && error.message.includes('@newsletter')) {
-                console.log(
-                    "💡 SUGGERIMENTO: L'ID nel messaggio di errore potrebbe essere quello corretto da usare come WHATSAPP_CHANNEL_ID",
-                );
+                console.log("💡 Verifica l'ID del canale WhatsApp nelle variabili d'ambiente");
             }
         }
-    });
+
+        console.log('=====================================');
+    }
+
+    // Funzione per determinare il tipo di messaggio
+    function getMessageType(message) {
+        if (message.photo) return 'Foto';
+        if (message.video) return 'Video';
+        if (message.document) return 'Documento';
+        if (message.text) return 'Testo';
+        if (message.caption) return 'Media con caption';
+        if (message.sticker) return 'Sticker';
+        if (message.animation) return 'GIF';
+        if (message.voice) return 'Messaggio vocale';
+        if (message.audio) return 'Audio';
+        if (message.location) return 'Posizione';
+        if (message.contact) return 'Contatto';
+        if (message.poll) return 'Sondaggio';
+        return 'Altro';
+    }
 
     // Gestione messaggi privati (per testing)
     bot.on('text', async (ctx) => {
@@ -340,8 +530,12 @@ Canale WhatsApp: ${WHATSAPP_CHANNEL_ID}
         }
     });
 
-    bot.launch();
-    console.log('🤖 Telegram Bot avviato');
+    bot.launch({
+        allowedUpdates: [], // ACCETTA TUTTI gli aggiornamenti possibili
+    });
+    console.log('🤖 Telegram Bot avviato in MODALITA COMPLETA');
+    console.log('🔄 Bot configurato per ricevere TUTTI i tipi di aggiornamento');
+    console.log('🎯 Monitorando qualsiasi attività sul canale...');
 
     // Graceful stop
     process.once('SIGINT', () => bot.stop('SIGINT'));
