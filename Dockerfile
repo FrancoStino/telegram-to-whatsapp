@@ -1,5 +1,5 @@
 # Usa un'immagine che già include Chrome e le dipendenze necessarie
-FROM ghcr.io/puppeteer/puppeteer:21.3.6
+FROM ghcr.io/puppeteer/puppeteer:24.17.0
 
 # Cambia alla directory di lavoro
 WORKDIR /usr/src/app
