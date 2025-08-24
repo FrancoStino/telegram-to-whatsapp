@@ -1,26 +1,29 @@
-# Usa un'immagine Node.js con supporto per Puppeteer
-FROM ghcr.io/puppeteer/puppeteer:22.0.0
+# Usa un'immagine che già include Chrome e le dipendenze necessarie
+FROM ghcr.io/puppeteer/puppeteer:21.3.6
 
-# Imposta la directory di lavoro
+# Cambia alla directory di lavoro
 WORKDIR /usr/src/app
 
-# Copia package.json e package-lock.json
-COPY package*.json ./
+# Copia i file package
+COPY --chown=pptruser:pptruser package*.json ./
 
-# Installa le dipendenze
-RUN npm ci --only=production
+# Installa solo le dipendenze di produzione
+RUN npm ci --only=production && npm cache clean --force
 
-# Copia il codice dell'applicazione
-COPY . .
+# Copia il resto del codice
+COPY --chown=pptruser:pptruser . .
 
-# Crea la directory per le sessioni WhatsApp
-RUN mkdir -p whatsapp_session && chown -R pptruser:pptruser whatsapp_session
+# Crea la directory per WhatsApp session
+RUN mkdir -p whatsapp_session && chown pptruser:pptruser whatsapp_session
 
-# Cambia utente per motivi di sicurezza
-USER pptruser
+# Imposta le variabili d'ambiente
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
 
 # Espone la porta
 EXPOSE 3000
 
-# Avvia l'applicazione
+# Avvia come utente non-root
+USER pptruser
+
 CMD ["npm", "start"]
