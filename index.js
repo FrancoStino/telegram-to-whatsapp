@@ -5,13 +5,21 @@ const QRCode = require('qrcode');
 
 require('dotenv').config();
 
+// Debug configurazione
+console.log('🔧 Configurazione:');
+console.log('PORT:', process.env.PORT);
+console.log('NODE_ENV:', process.env.NODE_ENV);
+console.log('TELEGRAM_BOT_TOKEN presente:', !!process.env.TELEGRAM_BOT_TOKEN);
+console.log('TELEGRAM_CHANNEL_ID:', process.env.TELEGRAM_CHANNEL_ID || 'Auto-detect');
+console.log('WHATSAPP_CHANNEL_ID:', process.env.WHATSAPP_CHANNEL_ID);
+
 // Configurazione
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHANNEL_ID = process.env.TELEGRAM_CHANNEL_ID;
 const WHATSAPP_CHANNEL_ID = process.env.WHATSAPP_CHANNEL_ID || '120363402931610117@newsletter';
-const PORT = process.env.PORT || process.env.NORTHFLANK_PORT || 3000;
+const PORT = process.env.PORT || process.env.NORTHFLANK_PORT || 8080;
 
-// Express server per mantenere attivo il servizio su Render
+// Express server per mantenere attivo il servizio
 const app = express();
 let qrCodeData = null;
 let isWhatsAppReady = false;
@@ -49,6 +57,7 @@ app.get('/', (req, res) => {
                         <h3>🔧 Strumenti:</h3>
                         <a href="/status" class="button">📊 Status JSON</a>
                         <a href="/channels" class="button">📺 Lista Canali</a>
+                        <a href="/health" class="button">💚 Health Check</a>
                         
                         <h3>📱 Comandi Telegram Bot:</h3>
                         <p><strong>/status</strong> - Stato del sistema</p>
@@ -106,6 +115,20 @@ app.get('/', (req, res) => {
             </html>
         `);
     }
+});
+
+// Health check endpoints
+app.get('/health', (req, res) => {
+    res.json({
+        status: 'healthy',
+        whatsappReady: isWhatsAppReady,
+        telegramBotConfigured: !!TELEGRAM_BOT_TOKEN,
+        timestamp: new Date().toISOString(),
+    });
+});
+
+app.get('/ping', (req, res) => {
+    res.send('pong');
 });
 
 // Endpoint per visualizzare solo i canali WhatsApp
@@ -170,36 +193,135 @@ app.get('/channels', async (req, res) => {
     }
 });
 
-// Endpoint status aggiornato
+// Endpoint status
 app.get('/status', (req, res) => {
     res.json({
         whatsappReady: isWhatsAppReady,
         telegramBotConfigured: !!TELEGRAM_BOT_TOKEN,
         whatsappChannelId: WHATSAPP_CHANNEL_ID,
         telegramChannelId: TELEGRAM_CHANNEL_ID || 'Auto-detect',
+        port: PORT,
         timestamp: new Date().toISOString(),
     });
 });
 
+// Funzione per trovare Chrome dinamicamente
+function findChromeExecutable() {
+    const { execSync } = require('child_process');
+    const fs = require('fs');
+
+    console.log('🔍 === RICERCA CHROME AUTOMATICA ===');
+
+    const searchMethods = [
+        {
+            name: 'which google-chrome-stable',
+            cmd: 'which google-chrome-stable',
+        },
+        {
+            name: 'which google-chrome',
+            cmd: 'which google-chrome',
+        },
+        {
+            name: 'which chromium-browser',
+            cmd: 'which chromium-browser',
+        },
+        {
+            name: 'which chromium',
+            cmd: 'which chromium',
+        },
+        {
+            name: 'env variable PUPPETEER_EXECUTABLE_PATH',
+            path: process.env.PUPPETEER_EXECUTABLE_PATH,
+        },
+        {
+            name: 'percorso standard /usr/bin/google-chrome-stable',
+            path: '/usr/bin/google-chrome-stable',
+        },
+    ];
+
+    for (const method of searchMethods) {
+        try {
+            let chromePath;
+
+            if (method.cmd) {
+                chromePath = execSync(method.cmd, { encoding: 'utf8' }).trim();
+            } else if (method.path) {
+                chromePath = method.path;
+            } else {
+                continue;
+            }
+
+            if (chromePath && fs.existsSync(chromePath)) {
+                // Test se Chrome può essere eseguito
+                try {
+                    const version = execSync(`"${chromePath}" --version`, {
+                        encoding: 'utf8',
+                        timeout: 5000,
+                    }).trim();
+
+                    console.log(`✅ ${method.name}: ${chromePath}`);
+                    console.log(`   Versione: ${version}`);
+                    console.log('=====================================\n');
+                    return chromePath;
+                } catch (testError) {
+                    console.log(`❌ ${method.name}: ${chromePath} esiste ma non è eseguibile`);
+                    console.log(`   Errore: ${testError.message}`);
+                }
+            } else {
+                console.log(`❌ ${method.name}: percorso non trovato o non esistente`);
+            }
+        } catch (error) {
+            console.log(`❌ ${method.name}: ${error.message}`);
+        }
+    }
+
+    console.log('⚠️ Nessun Chrome trovato, usando configurazione Puppeteer di default');
+    console.log('=====================================\n');
+    return null;
+}
+
 // Inizializza WhatsApp Client
 function initWhatsApp() {
+    // Trova Chrome dinamicamente
+    const executablePath = findChromeExecutable();
+
+    // Configurazione Puppeteer
+    const puppeteerConfig = {
+        headless: true,
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--disable-gpu',
+            '--disable-web-security',
+            '--disable-features=VizDisplayCompositor',
+            '--disable-extensions',
+            '--disable-default-apps',
+            '--disable-sync',
+            '--disable-background-timer-throttling',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-renderer-backgrounding',
+            '--memory-pressure-off',
+            '--max_old_space_size=4096',
+        ],
+    };
+
+    // Aggiungi executablePath solo se trovato
+    if (executablePath) {
+        puppeteerConfig.executablePath = executablePath;
+        console.log(`🎯 Usando Chrome: ${executablePath}`);
+    } else {
+        console.log('🤖 Usando Chrome/Chromium fornito da Puppeteer');
+    }
+
     whatsappClient = new Client({
         authStrategy: new LocalAuth({
             dataPath: './whatsapp_session',
         }),
-        puppeteer: {
-            headless: true,
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas',
-                '--no-first-run',
-                '--no-zygote',
-                '--single-process',
-                '--disable-gpu',
-            ],
-        },
+        puppeteer: puppeteerConfig,
     });
 
     whatsappClient.on('qr', async (qr) => {
@@ -257,7 +379,7 @@ function initTelegram() {
 
         const message = ctx.channelPost;
         console.log('📬 Nuovo messaggio dal canale Telegram:', ctx);
-        console.log('📬Caption Entititeis:', ctx.channelPost.caption_entities);
+        console.log('📬Caption Entities:', ctx.channelPost.caption_entities);
         console.log('📬Reply Markup:', ctx.channelPost.reply_markup);
 
         const channelUsername = message.chat.username;
@@ -323,10 +445,6 @@ function convertTelegramFormatting(text, entities) {
                 case 'code':
                     formatMap.get(i).add('code');
                     break;
-                // case 'underline':
-                //     // Converti underline in italic per WhatsApp
-                //     formatMap.get(i).add('italic');
-                //     break;
                 case 'spoiler':
                     // Mantieni spoiler come testo normale per ora
                     formatMap.get(i).add('spoiler');
@@ -565,8 +683,30 @@ console.log('🚀 Avviando il sistema...');
 console.log(`🎯 Canale WhatsApp target: ${WHATSAPP_CHANNEL_ID}`);
 
 // Avvia Express server
-app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`🌐 Server HTTP avviato sulla porta ${PORT}`);
+    console.log(`🌐 Indirizzo: 0.0.0.0:${PORT}`);
+});
+
+server.on('error', (err) => {
+    console.error('❌ Errore server:', err);
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+    console.log('🛑 Ricevuto SIGTERM, spegnimento graceful...');
+    server.close(() => {
+        console.log('✅ Server chiuso');
+        process.exit(0);
+    });
+});
+
+process.on('SIGINT', () => {
+    console.log('🛑 Ricevuto SIGINT, spegnimento graceful...');
+    server.close(() => {
+        console.log('✅ Server chiuso');
+        process.exit(0);
+    });
 });
 
 // Inizializza i client
