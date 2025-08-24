@@ -1,30 +1,31 @@
-FROM node:current-alpine3.22
+# Usa l'immagine Puppeteer ufficiale che ha già tutto configurato
+FROM ghcr.io/puppeteer/puppeteer:21.3.6
 
-# Installa Chrome e dipendenze in un solo layer
-RUN apt-get update && apt-get install -y \
-    wget \
-    gnupg2 \
-    ca-certificates \
-    && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
-    && sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list' \
-    && apt-get update \
-    && apt-get install -y google-chrome-stable \
-    && rm -rf /var/lib/apt/lists/*
+# Passa alla directory di lavoro
+WORKDIR /usr/src/app
 
-WORKDIR /app
-
-# Copia e installa dipendenze
+# Copia package.json come utente root per evitare errori
+USER root
 COPY package*.json ./
+RUN chown pptruser:pptruser package*.json
+
+# Torna all'utente pptruser per installare dipendenze
+USER pptruser
+
+# Installa le dipendenze Node.js
 RUN npm ci --only=production && npm cache clean --force
 
-# Copia codice
+# Copia il resto del codice (come root per evitare problemi)
+USER root
 COPY . .
-RUN mkdir -p whatsapp_session
+RUN chown -R pptruser:pptruser /usr/src/app
+RUN mkdir -p whatsapp_session && chown pptruser:pptruser whatsapp_session
 
-# Setup utente
-RUN groupadd -r nodeuser && useradd -r -g nodeuser nodeuser
-RUN chown -R nodeuser:nodeuser /app
-USER nodeuser
+# Torna all'utente non-root per l'esecuzione
+USER pptruser
 
+# Espone la porta
 EXPOSE 8080
+
+# Avvia l'applicazione
 CMD ["npm", "start"]
