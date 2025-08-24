@@ -1,53 +1,37 @@
-# === DOCKERFILE OTTIMIZZATO PER NORTHFLANK + PUPPETEER ===
-# Basato sulla documentazione ufficiale Puppeteer e best practices Docker
+# Dockerfile ottimizzato per Northflank
+FROM node:20-slim
 
-# Usa l'immagine ufficiale Puppeteer che include Chrome for Testing
-FROM ghcr.io/puppeteer/puppeteer:22.6.0
-
-# Imposta variabili d'ambiente per ottimizzare Puppeteer
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
-ENV NODE_ENV=production
+# Installa dipendenze Chrome
+RUN apt-get update \
+    && apt-get install -y wget gnupg \
+    && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
+    && sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list' \
+    && apt-get update \
+    && apt-get install -y google-chrome-stable fonts-ipafont-gothic fonts-wqy-zenhei fonts-thai-tlwg fonts-kacst fonts-freefont-ttf libxss1 \
+      --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
 
 # Crea directory di lavoro
 WORKDIR /usr/src/app
 
-# Passa a root per installazioni di sistema
-USER root
+# Imposta variabili d'ambiente per Puppeteer
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
 
-# Aggiorna il sistema e installa dipendenze aggiuntive se necessarie
-RUN apt-get update && apt-get install -y \
-    # Dipendenze per font e rendering
-    fonts-liberation \
-    fonts-noto-color-emoji \
-    fonts-noto-cjk \
-    # Utilità di sistema
-    curl \
-    wget \
-    # Pulisci cache
-    && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
-
-# Copia i file di configurazione delle dipendenze
+# Copia package files
 COPY package*.json ./
 
-# Installa le dipendenze Node.js come root per evitare problemi di permessi
+# Installa dipendenze Node.js
 RUN npm ci --only=production && npm cache clean --force
 
-# Copia tutto il codice dell'applicazione
+# Copia codice applicazione
 COPY . .
 
-# Crea la directory per le sessioni WhatsApp
+# Crea directory sessioni WhatsApp
 RUN mkdir -p whatsapp_session
 
-# Imposta i permessi corretti per l'utente pptruser
-RUN chown -R pptruser:pptruser /usr/src/app
-
-# Torna all'utente pptruser per l'esecuzione (sicurezza)
-USER pptruser
-
-# Espone la porta (NorthFlank usa di solito 8080)
+# Espone la porta (Northflank usa spesso 8080)
 EXPOSE 8080
 
-# Comando di avvio
+# Avvia applicazione
 CMD ["npm", "start"]

@@ -170,54 +170,37 @@ function getNorthFlankPuppeteerConfig() {
     console.log('🐳 === CONFIGURAZIONE PUPPETEER NORTHFLANK ===');
 
     const config = {
-        headless: true, // OBBLIGATORIO in ambiente container
+        headless: true,
         args: [
-            // Sicurezza container
             '--no-sandbox',
             '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
-
-            // Ottimizzazioni performance
             '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--disable-gpu',
             '--disable-background-timer-throttling',
             '--disable-backgrounding-occluded-windows',
             '--disable-renderer-backgrounding',
             '--disable-features=TranslateUI',
             '--disable-features=VizDisplayCompositor',
-            '--disable-ipc-flooding-protection',
-
-            // Gestione memoria
-            '--memory-pressure-off',
-            '--max_old_space_size=4096',
-
-            // Ottimizzazioni network
-            '--aggressive-cache-discard',
-            '--disable-background-networking',
-            '--disable-default-apps',
-            '--disable-extensions',
-            '--disable-sync',
-
-            // Stabilità
-            '--disable-web-security',
-            '--disable-gpu',
-            '--no-first-run',
-            '--no-zygote',
-            '--single-process', // Importante per NorthFlank
         ],
         defaultViewport: {
             width: 1280,
             height: 720,
         },
-        timeout: 90000, // Timeout generoso per NorthFlank
+        timeout: 90000,
         protocolTimeout: 90000,
     };
 
-    // Verifica se abbiamo il path di Chrome dal Docker
-    if (process.env.PUPPETEER_EXECUTABLE_PATH) {
-        config.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
-        console.log('✅ Chrome executable configurato:', process.env.PUPPETEER_EXECUTABLE_PATH);
+    // Per Northflank, usa il Chrome installato nel container
+    if (process.env.NODE_ENV === 'production' || process.env.PUPPETEER_EXECUTABLE_PATH) {
+        config.executablePath =
+            process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable';
+        console.log('✅ Chrome executable configurato:', config.executablePath);
     } else {
-        console.log('⚠️ PUPPETEER_EXECUTABLE_PATH non impostato, usando Chrome di default');
+        // Per sviluppo locale
+        console.log('⚠️ Modalità sviluppo locale, usando Chrome di Puppeteer');
     }
 
     console.log('📋 Configurazione Puppeteer finale:');
@@ -242,6 +225,11 @@ function initWhatsApp() {
             dataPath: './whatsapp_session',
         }),
         puppeteer: puppeteerConfig,
+        webVersionCache: {
+            type: 'remote',
+            remotePath:
+                'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
+        },
     });
 
     // Event handlers
@@ -287,7 +275,7 @@ function initWhatsApp() {
         console.log('⚠️ WhatsApp disconnesso:', reason);
         isWhatsAppReady = false;
 
-        // Riconnessione automatica dopo 45 secondi (NorthFlank friendly)
+        // Riconnessione automatica dopo 45 secondi
         setTimeout(() => {
             console.log('🔄 Tentativo di riconnessione automatica...');
             initWhatsApp();
@@ -299,9 +287,9 @@ function initWhatsApp() {
 
         if (error.message.includes('Failed to launch') || error.message.includes('Chrome')) {
             console.error('💡 SUGGERIMENTI NORTHFLANK:');
-            console.error("   1. Verifica che il Dockerfile usi l'immagine Puppeteer corretta");
+            console.error('   1. Verifica che il Dockerfile installi Chrome correttamente');
             console.error("   2. Controlla le variabili d'ambiente PUPPETEER_*");
-            console.error('   3. Assicurati che Chrome sia installato nel container');
+            console.error('   3. Assicurati che il path di Chrome sia corretto');
         }
     });
 
@@ -309,7 +297,7 @@ function initWhatsApp() {
     whatsappClient.initialize().catch((error) => {
         console.error('❌ Errore fatale durante inizializzazione WhatsApp:', error);
 
-        // Log dettagliato per debugging su NorthFlank
+        // Log dettagliato per debugging
         console.error('🔍 Debug info:');
         console.error('   Node version:', process.version);
         console.error('   Platform:', process.platform);
@@ -322,7 +310,7 @@ function initWhatsApp() {
         // Tentativo di restart dopo 60 secondi
         setTimeout(() => {
             console.log('🔄 Restart automatico dopo errore fatale...');
-            process.exit(1); // NorthFlank riavvierà automaticamente
+            process.exit(1);
         }, 60000);
     });
 }
@@ -338,6 +326,19 @@ function initTelegram() {
     console.log('🤖 Inizializzazione Telegram Bot per NorthFlank...');
     const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
 
+    // Comando status
+    bot.command('status', (ctx) => {
+        const status = {
+            whatsapp: isWhatsAppReady ? '✅ Connesso' : '❌ Disconnesso',
+            canaleTarget: WHATSAPP_CHANNEL_ID,
+            timestamp: new Date().toLocaleString('it-IT'),
+        };
+
+        ctx.reply(
+            `🤖 Status Sistema:\n\nWhatsApp: ${status.whatsapp}\nCanale Target: ${status.canaleTarget}\nAggiornato: ${status.timestamp}`,
+        );
+    });
+
     // Gestione messaggi dal canale Telegram
     bot.on('channel_post', async (ctx) => {
         if (!isWhatsAppReady) {
@@ -347,10 +348,21 @@ function initTelegram() {
 
         const message = ctx.channelPost;
         const channelUsername = message.chat.username;
+        const channelId = message.chat.id;
 
         console.log(
-            `📨 [NorthFlank] Messaggio ricevuto dal canale: @${channelUsername || 'unknown'}`,
+            `📨 [NorthFlank] Messaggio ricevuto dal canale: @${
+                channelUsername || 'unknown'
+            } (ID: ${channelId})`,
         );
+
+        // Se abbiamo un TELEGRAM_CHANNEL_ID specifico, controlla che corrisponda
+        if (TELEGRAM_CHANNEL_ID && channelId.toString() !== TELEGRAM_CHANNEL_ID) {
+            console.log(
+                `⚠️ Messaggio da canale non monitorato: ${channelId} (configurato: ${TELEGRAM_CHANNEL_ID})`,
+            );
+            return;
+        }
 
         try {
             console.log(`🎯 Inoltrando messaggio da @${channelUsername} verso canale WhatsApp...`);
@@ -368,7 +380,7 @@ function initTelegram() {
     });
 
     bot.launch({
-        dropPendingUpdates: true, // Ignora messaggi pendenti al riavvio
+        dropPendingUpdates: true,
     })
         .then(() => {
             console.log('✅ Telegram Bot avviato su NorthFlank');
@@ -377,14 +389,13 @@ function initTelegram() {
             console.error('❌ Errore avvio Telegram bot:', error);
         });
 
-    // Graceful shutdown per NorthFlank
+    // Graceful shutdown
     process.once('SIGINT', () => bot.stop('SIGINT'));
     process.once('SIGTERM', () => bot.stop('SIGTERM'));
 }
 
 // === FUNZIONI DI SUPPORTO ===
 
-// Funzione per gestire entità Telegram (mantieni quella esistente)
 function convertTelegramFormatting(text, entities) {
     if (!entities || entities.length === 0) {
         return text;
@@ -428,7 +439,6 @@ function convertTelegramFormatting(text, entities) {
         const char = text[i];
         const newFormats = formatMap.get(i) || new Set();
 
-        // Chiudi i tag che non sono più attivi
         const toClose = [...currentFormats].filter((f) => !newFormats.has(f));
         for (const format of toClose.reverse()) {
             if (format === 'bold') result += '*';
@@ -438,7 +448,6 @@ function convertTelegramFormatting(text, entities) {
             currentFormats.delete(format);
         }
 
-        // Apri i nuovi tag
         const toOpen = [...newFormats].filter((f) => !currentFormats.has(f) && f !== 'spoiler');
         for (const format of toOpen) {
             if (format === 'bold') result += '*';
@@ -451,7 +460,6 @@ function convertTelegramFormatting(text, entities) {
         result += char;
     }
 
-    // Chiudi tutti i tag rimasti aperti
     for (const format of [...currentFormats].reverse()) {
         if (format === 'bold') result += '*';
         else if (format === 'italic') result += '_';
@@ -462,7 +470,6 @@ function convertTelegramFormatting(text, entities) {
     return result;
 }
 
-// Le altre funzioni rimangono uguali (forwardToWhatsApp, getFileUrl, logWhatsAppChannels)
 async function forwardToWhatsApp(telegramMessage) {
     if (!whatsappClient || !isWhatsAppReady) {
         throw new Error('WhatsApp client non pronto');
@@ -482,7 +489,7 @@ async function forwardToWhatsApp(telegramMessage) {
         );
     }
 
-    // Gestione media (foto, video, documenti)
+    // Gestione media
     if (telegramMessage.photo) {
         const photo = telegramMessage.photo[telegramMessage.photo.length - 1];
         const fileUrl = await getFileUrl(photo.file_id);
@@ -527,7 +534,6 @@ async function getFileUrl(fileId) {
     return `https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${file.file_path}`;
 }
 
-// Funzione semplificata per loggare solo il canale target
 async function logWhatsAppChannels() {
     try {
         console.log('\n📺 === VERIFICA CANALE TARGET ===');
@@ -590,7 +596,7 @@ process.on('SIGINT', () => {
 initWhatsApp();
 setTimeout(() => {
     initTelegram();
-}, 5000); // Aspetta 5 secondi per l'inizializzazione di WhatsApp
+}, 5000);
 
 // Gestione errori non catturati
 process.on('unhandledRejection', (error) => {
