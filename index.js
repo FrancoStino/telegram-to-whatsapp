@@ -9,7 +9,7 @@ require('dotenv').config();
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHANNEL_ID = process.env.TELEGRAM_CHANNEL_ID;
 const WHATSAPP_CHANNEL_ID = process.env.WHATSAPP_CHANNEL_ID || '120363402931610117@newsletter';
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || process.env.NORTHFLANK_PORT || 3000;
 
 // Express server per mantenere attivo il servizio su Render
 const app = express();
@@ -565,7 +565,7 @@ console.log('🚀 Avviando il sistema...');
 console.log(`🎯 Canale WhatsApp target: ${WHATSAPP_CHANNEL_ID}`);
 
 // Avvia Express server
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
     console.log(`🌐 Server HTTP avviato sulla porta ${PORT}`);
 });
 
