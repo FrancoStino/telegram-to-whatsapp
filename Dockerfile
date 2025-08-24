@@ -1,27 +1,30 @@
-FROM ghcr.io/puppeteer/puppeteer:24.17.0
+FROM node:current-alpine3.22
 
-WORKDIR /usr/src/app
+# Installa Chrome e dipendenze in un solo layer
+RUN apt-get update && apt-get install -y \
+    wget \
+    gnupg2 \
+    ca-certificates \
+    && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
+    && sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list' \
+    && apt-get update \
+    && apt-get install -y google-chrome-stable \
+    && rm -rf /var/lib/apt/lists/*
 
-COPY --chown=pptruser:pptruser package*.json ./
+WORKDIR /app
 
+# Copia e installa dipendenze
+COPY package*.json ./
 RUN npm ci --only=production && npm cache clean --force
 
-COPY --chown=pptruser:pptruser . .
+# Copia codice
+COPY . .
+RUN mkdir -p whatsapp_session
 
-# Crea la directory per la sessione di WhatsApp
-RUN mkdir -p whatsapp_session && chown pptruser:pptruser whatsapp_session
+# Setup utente
+RUN groupadd -r nodeuser && useradd -r -g nodeuser nodeuser
+RUN chown -R nodeuser:nodeuser /app
+USER nodeuser
 
-# Rileva automaticamente il binario del browser (chromium o chrome)
-RUN BROWSER_PATH=$(which chromium || which google-chrome || which google-chrome-stable) \
-    && echo "export PUPPETEER_EXECUTABLE_PATH=$BROWSER_PATH" >> /etc/profile.d/puppeteer.sh
-
-# Espone la porta
-EXPOSE 3000
-
-USER pptruser
-
-# Carica la variabile al runtime
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-ENV PATH=$PATH:/usr/src/app
-
-CMD ["/bin/bash", "-lc", "npm start"]
+EXPOSE 8080
+CMD ["npm", "start"]
