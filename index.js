@@ -2,25 +2,24 @@ const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const { Telegraf } = require('telegraf');
 const express = require('express');
 const QRCode = require('qrcode');
+const qrcode = require('qrcode-terminal');
 
 require('dotenv').config();
 
-// === CONFIGURAZIONE PER NORTHFLANK ===
-console.log('🔧 === CONFIGURAZIONE NORTHFLANK ===');
-console.log('PORT:', process.env.PORT || 8080);
+// === CONFIGURAZIONE ===
+console.log('🔧 === CONFIGURAZIONE ===');
+console.log('PORT:', process.env.PORT || 3000);
 console.log('NODE_ENV:', process.env.NODE_ENV);
 console.log('TELEGRAM_BOT_TOKEN presente:', !!process.env.TELEGRAM_BOT_TOKEN);
 console.log('TELEGRAM_CHANNEL_ID:', process.env.TELEGRAM_CHANNEL_ID || 'Auto-detect');
 console.log('WHATSAPP_CHANNEL_ID:', process.env.WHATSAPP_CHANNEL_ID);
-console.log('PUPPETEER_EXECUTABLE_PATH:', process.env.PUPPETEER_EXECUTABLE_PATH);
-console.log('PUPPETEER_SKIP_CHROMIUM_DOWNLOAD:', process.env.PUPPETEER_SKIP_CHROMIUM_DOWNLOAD);
-console.log('=====================================\n');
+console.log('=============================\n');
 
 // Configurazione
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHANNEL_ID = process.env.TELEGRAM_CHANNEL_ID;
 const WHATSAPP_CHANNEL_ID = process.env.WHATSAPP_CHANNEL_ID || '120363402931610117@newsletter';
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 3000;
 
 // Express server
 const app = express();
@@ -37,99 +36,93 @@ app.use(express.static('public'));
 app.get('/', (req, res) => {
     if (isWhatsAppReady) {
         res.send(`
-            <html>
-                <head>
-                    <title>Sistema Prezzi WOW - NorthFlank</title>
-                    <meta charset="utf-8">
-                    <style>
-                        body { font-family: Arial, sans-serif; text-align: center; padding: 20px; background: #f5f5f5; }
-                        .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-                        .status { color: #28a745; font-weight: bold; font-size: 18px; }
-                        .button { 
-                            background: #25D366; color: white; padding: 12px 24px; 
-                            text-decoration: none; border-radius: 5px; margin: 10px;
-                            display: inline-block; transition: background 0.3s;
-                        }
-                        .button:hover { background: #1da851; }
-                        .platform { background: #007bff; color: white; padding: 5px 10px; border-radius: 3px; font-size: 12px; }
-                    </style>
-                </head>
-                <body>
-                    <div class="container">
-                        <h1>🏷️ Sistema Prezzi WOW</h1>
-                        <span class="platform">NorthFlank</span>
-                        <p class="status">✅ WhatsApp connesso e sistema operativo</p>
-                        
-                        <h3>🔧 Strumenti:</h3>
-                        <a href="/status" class="button">📊 Status JSON</a>
-                        <a href="/channels" class="button">📺 Lista Canali</a>
-                        <a href="/health" class="button">💚 Health Check</a>
-                        
-                        <h3>📱 Comandi Telegram Bot:</h3>
-                        <p><strong>/status</strong> - Stato del sistema</p>
-                        <p><strong>/channels</strong> - Aggiorna lista canali WhatsApp</p>
-                        
-                        <div style="margin-top: 30px; font-size: 12px; color: #666;">
-                            Sistema attivo su NorthFlank - Monitoraggio @prezzi_wow → Canale WhatsApp
-                        </div>
-                    </div>
-                </body>
-            </html>
+        <html>
+        <head>
+        <title>Sistema Prezzi WOW</title>
+        <meta charset="utf-8">
+        <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 20px; background: #f5f5f5; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .status { color: #28a745; font-weight: bold; font-size: 18px; }
+        .button {
+            background: #25D366; color: white; padding: 12px 24px;
+            text-decoration: none; border-radius: 5px; margin: 10px;
+            display: inline-block; transition: background 0.3s;
+        }
+        .button:hover { background: #1da851; }
+        </style>
+        </head>
+        <body>
+        <div class="container">
+        <h1>🏷️ Sistema Prezzi WOW</h1>
+        <p class="status">✅ WhatsApp connesso e sistema operativo</p>
+
+        <h3>🔧 Strumenti:</h3>
+        <a href="/status" class="button">📊 Status JSON</a>
+        <a href="/channels" class="button">📺 Lista Canali</a>
+        <a href="/health" class="button">💚 Health Check</a>
+
+        <h3>📱 Comandi Telegram Bot:</h3>
+        <p><strong>/status</strong> - Stato del sistema</p>
+        <p><strong>/channels</strong> - Aggiorna lista canali WhatsApp</p>
+
+        <div style="margin-top: 30px; font-size: 12px; color: #666;">
+        Sistema attivo - Monitoraggio @prezzi_wow → Canale WhatsApp
+        </div>
+        </div>
+        </body>
+        </html>
         `);
     } else if (qrCodeData) {
         res.send(`
-            <html>
-                <head>
-                    <title>Connetti WhatsApp - NorthFlank</title>
-                    <meta charset="utf-8">
-                    <style>
-                        body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #f5f5f5; }
-                        .container { max-width: 400px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-                        .qr-code { max-width: 300px; margin: 20px 0; border: 1px solid #ddd; border-radius: 5px; }
-                        .platform { background: #007bff; color: white; padding: 5px 10px; border-radius: 3px; font-size: 12px; }
-                    </style>
-                </head>
-                <body>
-                    <div class="container">
-                        <span class="platform">NorthFlank</span>
-                        <h1>📱 Connetti WhatsApp</h1>
-                        <p>Usa WhatsApp per scansionare questo codice QR:</p>
-                        <img src="${qrCodeData}" alt="QR Code" class="qr-code">
-                        <p><small>La pagina si aggiornerà automaticamente tra 10 secondi</small></p>
-                        <script>
-                            setTimeout(() => location.reload(), 10000);
-                        </script>
-                    </div>
-                </body>
-            </html>
+        <html>
+        <head>
+        <title>Connetti WhatsApp</title>
+        <meta charset="utf-8">
+        <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #f5f5f5; }
+        .container { max-width: 400px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .qr-code { max-width: 300px; margin: 20px 0; border: 1px solid #ddd; border-radius: 5px; }
+        </style>
+        </head>
+        <body>
+        <div class="container">
+        <h1>📱 Connetti WhatsApp</h1>
+        <p>Usa WhatsApp per scansionare questo codice QR:</p>
+        <img src="${qrCodeData}" alt="QR Code" class="qr-code">
+        <p><small>La pagina si aggiornerà automaticamente tra 10 secondi</small></p>
+        <script>
+        setTimeout(() => location.reload(), 10000);
+        </script>
+        </div>
+        </body>
+        </html>
         `);
     } else {
         res.send(`
-            <html>
-                <head>
-                    <title>Inizializzazione... - NorthFlank</title>
-                    <meta charset="utf-8">
-                    <style>
-                        body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #f5f5f5; }
-                        .container { max-width: 400px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-                        .platform { background: #007bff; color: white; padding: 5px 10px; border-radius: 3px; font-size: 12px; }
-                        .spinner { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 30px; height: 30px; animation: spin 2s linear infinite; margin: 20px auto; }
-                        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-                    </style>
-                </head>
-                <body>
-                    <div class="container">
-                        <span class="platform">NorthFlank</span>
-                        <h1>🔄 Inizializzazione Sistema</h1>
-                        <div class="spinner"></div>
-                        <p>Il sistema si sta avviando, attendere...</p>
-                        <p><small>Chrome loading e configurazione Puppeteer in corso...</small></p>
-                        <script>
-                            setTimeout(() => location.reload(), 5000);
-                        </script>
-                    </div>
-                </body>
-            </html>
+        <html>
+        <head>
+        <title>Inizializzazione...</title>
+        <meta charset="utf-8">
+        <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #f5f5f5; }
+        .container { max-width: 400px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .spinner { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 30px; height: 30px; animation: spin 2s linear infinite; margin: 20px auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        </style>
+        </head>
+        <body>
+        <div class="container">
+        <h1>🔄 Inizializzazione Sistema</h1>
+        <div class="spinner"></div>
+        <p>Il sistema si sta avviando, attendere...</p>
+        <p><small>Configurazione in corso...</small></p>
+        <script>
+        setTimeout(() => location.reload(), 5000);
+        </script>
+        </div>
+        </body>
+        </html>
         `);
     }
 });
@@ -137,11 +130,8 @@ app.get('/', (req, res) => {
 app.get('/health', (req, res) => {
     res.json({
         status: 'healthy',
-        platform: 'NorthFlank',
         whatsappReady: isWhatsAppReady,
         telegramBotConfigured: !!TELEGRAM_BOT_TOKEN,
-        chromeExecutable: process.env.PUPPETEER_EXECUTABLE_PATH,
-        chromeSkipDownload: process.env.PUPPETEER_SKIP_CHROMIUM_DOWNLOAD,
         timestamp: new Date().toISOString(),
     });
 });
@@ -152,22 +142,39 @@ app.get('/ping', (req, res) => {
 
 app.get('/status', (req, res) => {
     res.json({
-        platform: 'NorthFlank',
         whatsappReady: isWhatsAppReady,
         telegramBotConfigured: !!TELEGRAM_BOT_TOKEN,
         whatsappChannelId: WHATSAPP_CHANNEL_ID,
         telegramChannelId: TELEGRAM_CHANNEL_ID || 'Auto-detect',
-        chromeExecutable: process.env.PUPPETEER_EXECUTABLE_PATH,
         port: PORT,
         nodeEnv: process.env.NODE_ENV,
         timestamp: new Date().toISOString(),
     });
 });
 
-// === CONFIGURAZIONE PUPPETEER OTTIMIZZATA PER NORTHFLANK ===
+app.get('/channels', async (req, res) => {
+    if (!isWhatsAppReady) {
+        return res.json({ error: 'WhatsApp non connesso' });
+    }
 
-function getNorthFlankPuppeteerConfig() {
-    console.log('🐳 === CONFIGURAZIONE PUPPETEER NORTHFLANK ===');
+    try {
+        const channels = await whatsappClient.getChannels();
+        res.json({
+            channels: channels.map(ch => ({
+                id: ch.id._serialized || ch.id,
+                name: ch.name || 'N/A'
+            })),
+            count: channels.length
+        });
+    } catch (error) {
+        res.json({ error: error.message });
+    }
+});
+
+// === CONFIGURAZIONE PUPPETEER ===
+
+function getPuppeteerConfig() {
+    console.log('🐳 === CONFIGURAZIONE PUPPETEER ===');
 
     const config = {
         headless: true,
@@ -193,10 +200,9 @@ function getNorthFlankPuppeteerConfig() {
         protocolTimeout: 90000,
     };
 
-    // Per Northflank, usa il Chrome installato nel container
-    if (process.env.NODE_ENV === 'production' || process.env.PUPPETEER_EXECUTABLE_PATH) {
-        config.executablePath =
-            process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable';
+    // Per produzione, usa il Chrome installato nel sistema
+    if (process.env.NODE_ENV === 'production' && process.env.PUPPETEER_EXECUTABLE_PATH) {
+        config.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
         console.log('✅ Chrome executable configurato:', config.executablePath);
     } else {
         // Per sviluppo locale
@@ -208,7 +214,7 @@ function getNorthFlankPuppeteerConfig() {
     console.log('   Args:', config.args.length, 'parametri');
     console.log('   Timeout:', config.timeout + 'ms');
     console.log('   Executable:', config.executablePath || 'Default Puppeteer Chrome');
-    console.log('=============================================\n');
+    console.log('==========================================\n');
 
     return config;
 }
@@ -216,9 +222,9 @@ function getNorthFlankPuppeteerConfig() {
 // === INIZIALIZZAZIONE WHATSAPP ===
 
 function initWhatsApp() {
-    console.log('🚀 Inizializzazione WhatsApp Client per NorthFlank...');
+    console.log('🚀 Inizializzazione WhatsApp Client...');
 
-    const puppeteerConfig = getNorthFlankPuppeteerConfig();
+    const puppeteerConfig = getPuppeteerConfig();
 
     whatsappClient = new Client({
         authStrategy: new LocalAuth({
@@ -228,14 +234,21 @@ function initWhatsApp() {
         webVersionCache: {
             type: 'remote',
             remotePath:
-                'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
+            'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
         },
     });
 
     // Event handlers
     whatsappClient.on('qr', async (qr) => {
-        console.log('📱 QR Code ricevuto, generando immagine...');
+        console.log('📱 QR Code ricevuto!');
+
+        // Genera QR Code nel terminale
+        console.log('\n=== QR CODE PER WHATSAPP ===');
+        qrcode.generate(qr, { small: true });
+        console.log('=== Scansiona con WhatsApp ===\n');
+
         try {
+            // Genera anche QR Code per l'interfaccia web
             qrCodeData = await QRCode.toDataURL(qr, {
                 errorCorrectionLevel: 'M',
                 type: 'image/png',
@@ -246,14 +259,14 @@ function initWhatsApp() {
                     light: '#FFFFFF',
                 },
             });
-            console.log('✅ QR Code generato per NorthFlank UI');
+            console.log('✅ QR Code generato anche per interfaccia web');
         } catch (err) {
-            console.error('❌ Errore nella generazione del QR Code:', err);
+            console.error('❌ Errore nella generazione del QR Code per web:', err);
         }
     });
 
     whatsappClient.on('ready', async () => {
-        console.log('✅ WhatsApp Client è pronto su NorthFlank!');
+        console.log('✅ WhatsApp Client è pronto!');
         console.log(`🎯 Canale target configurato: ${WHATSAPP_CHANNEL_ID}`);
         isWhatsAppReady = true;
         qrCodeData = null;
@@ -263,7 +276,7 @@ function initWhatsApp() {
     });
 
     whatsappClient.on('authenticated', () => {
-        console.log('🔐 WhatsApp autenticato su NorthFlank');
+        console.log('🔐 WhatsApp autenticato');
     });
 
     whatsappClient.on('auth_failure', (msg) => {
@@ -284,13 +297,6 @@ function initWhatsApp() {
 
     whatsappClient.on('error', (error) => {
         console.error('❌ Errore WhatsApp Client:', error);
-
-        if (error.message.includes('Failed to launch') || error.message.includes('Chrome')) {
-            console.error('💡 SUGGERIMENTI NORTHFLANK:');
-            console.error('   1. Verifica che il Dockerfile installi Chrome correttamente');
-            console.error("   2. Controlla le variabili d'ambiente PUPPETEER_*");
-            console.error('   3. Assicurati che il path di Chrome sia corretto');
-        }
     });
 
     // Inizializza con gestione errori robusta
@@ -323,7 +329,7 @@ function initTelegram() {
         return;
     }
 
-    console.log('🤖 Inizializzazione Telegram Bot per NorthFlank...');
+    console.log('🤖 Inizializzazione Telegram Bot...');
     const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
 
     // Comando status
@@ -339,6 +345,30 @@ function initTelegram() {
         );
     });
 
+    // Comando channels
+    bot.command('channels', async (ctx) => {
+        if (!isWhatsAppReady) {
+            return ctx.reply('❌ WhatsApp non connesso');
+        }
+
+        try {
+            const channels = await whatsappClient.getChannels();
+            let response = `📺 Canali WhatsApp disponibili (${channels.length}):\n\n`;
+
+            channels.slice(0, 10).forEach((channel, index) => {
+                response += `${index + 1}. ${channel.name || 'N/A'}\n   ID: \`${channel.id._serialized || channel.id}\`\n\n`;
+            });
+
+            if (channels.length > 10) {
+                response += `... e altri ${channels.length - 10} canali`;
+            }
+
+            ctx.reply(response, { parse_mode: 'Markdown' });
+        } catch (error) {
+            ctx.reply(`❌ Errore: ${error.message}`);
+        }
+    });
+
     // Gestione messaggi dal canale Telegram
     bot.on('channel_post', async (ctx) => {
         if (!isWhatsAppReady) {
@@ -351,7 +381,7 @@ function initTelegram() {
         const channelId = message.chat.id;
 
         console.log(
-            `📨 [NorthFlank] Messaggio ricevuto dal canale: @${
+            `📨 Messaggio ricevuto dal canale: @${
                 channelUsername || 'unknown'
             } (ID: ${channelId})`,
         );
@@ -382,12 +412,12 @@ function initTelegram() {
     bot.launch({
         dropPendingUpdates: true,
     })
-        .then(() => {
-            console.log('✅ Telegram Bot avviato su NorthFlank');
-        })
-        .catch((error) => {
-            console.error('❌ Errore avvio Telegram bot:', error);
-        });
+    .then(() => {
+        console.log('✅ Telegram Bot avviato');
+    })
+    .catch((error) => {
+        console.error('❌ Errore avvio Telegram bot:', error);
+    });
 
     // Graceful shutdown
     process.once('SIGINT', () => bot.stop('SIGINT'));
@@ -561,14 +591,15 @@ async function logWhatsAppChannels() {
     }
 }
 
-// Avvia il sistema
+// === AVVIO SISTEMA ===
+
 console.log('🚀 Avviando il sistema...');
 console.log(`🎯 Canale WhatsApp target: ${WHATSAPP_CHANNEL_ID}`);
 
 // Avvia Express server
-const server = app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, () => {
     console.log(`🌐 Server HTTP avviato sulla porta ${PORT}`);
-    console.log(`🌐 Indirizzo: 0.0.0.0:${PORT}`);
+    console.log(`🔗 Interfaccia web: http://localhost:${PORT}`);
 });
 
 server.on('error', (err) => {

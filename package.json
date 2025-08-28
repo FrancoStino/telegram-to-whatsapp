@@ -6,8 +6,7 @@
     "scripts": {
         "start": "node index.js",
         "dev": "nodemon index.js",
-        "postinstall": "echo 'Skipping Chromium download'",
-        "heroku-postbuild": "npm run build && mkdir  ./.cache && mv /app/.cache/puppeteer ./.cache"
+        "postinstall": "echo 'Skipping Chromium download'"
     },
     "dependencies": {
         "whatsapp-web.js": "^1.32.0",
@@ -15,6 +14,7 @@
         "puppeteer": "^24.17.0",
         "express": "^5.1.0",
         "qrcode": "^1.5.4",
+        "qrcode-terminal": "^0.12.0",
         "fs-extra": "^11.3.1",
         "dotenv": "^17.2.1"
     },
