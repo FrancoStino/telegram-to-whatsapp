@@ -6,6 +6,19 @@
     "scripts": {
         "start": "node index.js",
         "dev": "nodemon index.js",
+        "pm2:start": "pm2 start ecosystem.config.js",
+        "pm2:stop": "pm2 stop telegram-whatsapp-forwarder",
+        "pm2:restart": "pm2 restart telegram-whatsapp-forwarder",
+        "pm2:logs": "pm2 logs telegram-whatsapp-forwarder",
+        "pm2:monit": "pm2 monit",
+        "pm2:delete": "pm2 delete telegram-whatsapp-forwarder",
+        "system:start": "sudo systemctl start telegram-whatsapp.service",
+        "system:stop": "sudo systemctl stop telegram-whatsapp.service",
+        "system:status": "sudo systemctl status telegram-whatsapp.service",
+        "system:logs": "journalctl -u telegram-whatsapp -f",
+        "nohup:start": "nohup node index.js > logs/output.log 2>&1 & echo $! > app.pid",
+        "nohup:stop": "kill $(cat app.pid) && rm app.pid",
+        "logs": "tail -f logs/output.log",
         "postinstall": "echo 'Skipping Chromium download'"
     },
     "dependencies": {

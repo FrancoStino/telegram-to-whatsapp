@@ -26,6 +26,7 @@ const app = express();
 let qrCodeData = null;
 let isWhatsAppReady = false;
 let whatsappClient = null;
+let healthCheckInterval = null;
 
 // Middleware
 app.use(express.json());
@@ -133,6 +134,8 @@ app.get('/health', (req, res) => {
         whatsappReady: isWhatsAppReady,
         telegramBotConfigured: !!TELEGRAM_BOT_TOKEN,
         timestamp: new Date().toISOString(),
+             uptime: process.uptime(),
+             memory: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB',
     });
 });
 
@@ -149,6 +152,8 @@ app.get('/status', (req, res) => {
         port: PORT,
         nodeEnv: process.env.NODE_ENV,
         timestamp: new Date().toISOString(),
+             uptime: process.uptime(),
+             memory: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB',
     });
 });
 
@@ -160,21 +165,64 @@ app.get('/channels', async (req, res) => {
     try {
         const channels = await whatsappClient.getChannels();
         res.json({
-            channels: channels.map(ch => ({
+            channels: channels.map((ch) => ({
                 id: ch.id._serialized || ch.id,
-                name: ch.name || 'N/A'
+                name: ch.name || 'N/A',
             })),
-            count: channels.length
+            count: channels.length,
         });
     } catch (error) {
         res.json({ error: error.message });
     }
 });
 
-// === CONFIGURAZIONE PUPPETEER ===
+// === FUNZIONI DI UTILITÀ ===
+
+async function isWhatsAppClientHealthy() {
+    if (!whatsappClient || !isWhatsAppReady) {
+        return false;
+    }
+
+    try {
+        await whatsappClient.getState();
+        return true;
+    } catch (error) {
+        console.log('⚠️ Client WhatsApp non sano:', error.message);
+        return false;
+    }
+}
+
+function startWhatsAppHealthCheck() {
+    if (healthCheckInterval) {
+        clearInterval(healthCheckInterval);
+    }
+
+    healthCheckInterval = setInterval(async () => {
+        if (isWhatsAppReady && whatsappClient) {
+            try {
+                await whatsappClient.getState();
+                console.log('💚 WhatsApp health check OK');
+            } catch (error) {
+                console.log('❌ WhatsApp health check fallito:', error.message);
+
+                if (
+                    error.message.includes('Session closed') ||
+                    error.message.includes('page has been closed') ||
+                    error.message.includes('Target closed')
+                ) {
+                    console.log('🔄 Forzando reinizializzazione per health check fallito');
+                    isWhatsAppReady = false;
+                    whatsappClient.emit('disconnected', 'Health check failed');
+                }
+            }
+        }
+    }, 60000); // Check ogni minuto
+}
+
+// === CONFIGURAZIONE PUPPETEER MIGLIORATA ===
 
 function getPuppeteerConfig() {
-    console.log('🐳 === CONFIGURAZIONE PUPPETEER ===');
+    console.log('🐳 === CONFIGURAZIONE PUPPETEER MIGLIORATA ===');
 
     const config = {
         headless: true,
@@ -191,31 +239,29 @@ function getPuppeteerConfig() {
             '--disable-renderer-backgrounding',
             '--disable-features=TranslateUI',
             '--disable-features=VizDisplayCompositor',
+            '--disable-web-security',
+            '--disable-features=site-per-process',
+            '--single-process', // Importante per evitare crash
+            '--disable-extensions',
+            '--disable-plugins',
         ],
         defaultViewport: {
             width: 1280,
             height: 720,
         },
-        timeout: 90000,
-        protocolTimeout: 90000,
+        timeout: 120000,
+        protocolTimeout: 120000,
+        keepAlive: true,
     };
 
-    // Per produzione, usa il Chrome installato nel sistema
     if (process.env.NODE_ENV === 'production' && process.env.PUPPETEER_EXECUTABLE_PATH) {
         config.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
         console.log('✅ Chrome executable configurato:', config.executablePath);
     } else {
-        // Per sviluppo locale
         console.log('⚠️ Modalità sviluppo locale, usando Chrome di Puppeteer');
     }
 
-    console.log('📋 Configurazione Puppeteer finale:');
-    console.log('   Headless:', config.headless);
-    console.log('   Args:', config.args.length, 'parametri');
-    console.log('   Timeout:', config.timeout + 'ms');
-    console.log('   Executable:', config.executablePath || 'Default Puppeteer Chrome');
-    console.log('==========================================\n');
-
+    console.log('📋 Configurazione Puppeteer migliorata completata');
     return config;
 }
 
@@ -242,13 +288,11 @@ function initWhatsApp() {
     whatsappClient.on('qr', async (qr) => {
         console.log('📱 QR Code ricevuto!');
 
-        // Genera QR Code nel terminale
         console.log('\n=== QR CODE PER WHATSAPP ===');
         qrcode.generate(qr, { small: true });
         console.log('=== Scansiona con WhatsApp ===\n');
 
         try {
-            // Genera anche QR Code per l'interfaccia web
             qrCodeData = await QRCode.toDataURL(qr, {
                 errorCorrectionLevel: 'M',
                 type: 'image/png',
@@ -271,7 +315,9 @@ function initWhatsApp() {
         isWhatsAppReady = true;
         qrCodeData = null;
 
-        // Verifica rapida del canale target
+        // Avvia health check periodico
+        startWhatsAppHealthCheck();
+
         await logWhatsAppChannels();
     });
 
@@ -284,26 +330,37 @@ function initWhatsApp() {
         isWhatsAppReady = false;
     });
 
-    whatsappClient.on('disconnected', (reason) => {
+    whatsappClient.on('disconnected', async (reason) => {
         console.log('⚠️ WhatsApp disconnesso:', reason);
         isWhatsAppReady = false;
+        qrCodeData = null;
 
-        // Riconnessione automatica dopo 45 secondi
+        // Ferma health check
+        if (healthCheckInterval) {
+            clearInterval(healthCheckInterval);
+            healthCheckInterval = null;
+        }
+
+        try {
+            await whatsappClient.destroy();
+        } catch (error) {
+            console.log('⚠️ Errore durante pulizia client:', error.message);
+        }
+
+        whatsappClient = null;
+
         setTimeout(() => {
             console.log('🔄 Tentativo di riconnessione automatica...');
             initWhatsApp();
-        }, 45000);
+        }, 30000);
     });
 
     whatsappClient.on('error', (error) => {
         console.error('❌ Errore WhatsApp Client:', error);
     });
 
-    // Inizializza con gestione errori robusta
     whatsappClient.initialize().catch((error) => {
         console.error('❌ Errore fatale durante inizializzazione WhatsApp:', error);
-
-        // Log dettagliato per debugging
         console.error('🔍 Debug info:');
         console.error('   Node version:', process.version);
         console.error('   Platform:', process.platform);
@@ -313,7 +370,6 @@ function initWhatsApp() {
             Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB',
         );
 
-        // Tentativo di restart dopo 60 secondi
         setTimeout(() => {
             console.log('🔄 Restart automatico dopo errore fatale...');
             process.exit(1);
@@ -332,20 +388,20 @@ function initTelegram() {
     console.log('🤖 Inizializzazione Telegram Bot...');
     const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
 
-    // Comando status
     bot.command('status', (ctx) => {
         const status = {
             whatsapp: isWhatsAppReady ? '✅ Connesso' : '❌ Disconnesso',
             canaleTarget: WHATSAPP_CHANNEL_ID,
-            timestamp: new Date().toLocaleString('it-IT'),
+            uptime: Math.floor(process.uptime() / 60) + ' minuti',
+                memory: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB',
+                timestamp: new Date().toLocaleString('it-IT'),
         };
 
         ctx.reply(
-            `🤖 Status Sistema:\n\nWhatsApp: ${status.whatsapp}\nCanale Target: ${status.canaleTarget}\nAggiornato: ${status.timestamp}`,
+            `🤖 Status Sistema:\n\nWhatsApp: ${status.whatsapp}\nCanale Target: ${status.canaleTarget}\nUptime: ${status.uptime}\nMemoria: ${status.memory}\nAggiornato: ${status.timestamp}`,
         );
     });
 
-    // Comando channels
     bot.command('channels', async (ctx) => {
         if (!isWhatsAppReady) {
             return ctx.reply('❌ WhatsApp non connesso');
@@ -356,7 +412,9 @@ function initTelegram() {
             let response = `📺 Canali WhatsApp disponibili (${channels.length}):\n\n`;
 
             channels.slice(0, 10).forEach((channel, index) => {
-                response += `${index + 1}. ${channel.name || 'N/A'}\n   ID: \`${channel.id._serialized || channel.id}\`\n\n`;
+                response += `${index + 1}. ${channel.name || 'N/A'}\n   ID: \`${
+                    channel.id._serialized || channel.id
+                }\`\n\n`;
             });
 
             if (channels.length > 10) {
@@ -369,7 +427,6 @@ function initTelegram() {
         }
     });
 
-    // Gestione messaggi dal canale Telegram
     bot.on('channel_post', async (ctx) => {
         if (!isWhatsAppReady) {
             console.log('⚠️ WhatsApp non ancora pronto, messaggio ignorato');
@@ -381,12 +438,9 @@ function initTelegram() {
         const channelId = message.chat.id;
 
         console.log(
-            `📨 Messaggio ricevuto dal canale: @${
-                channelUsername || 'unknown'
-            } (ID: ${channelId})`,
+            `📨 Messaggio ricevuto dal canale: @${channelUsername || 'unknown'} (ID: ${channelId})`,
         );
 
-        // Se abbiamo un TELEGRAM_CHANNEL_ID specifico, controlla che corrisponda
         if (TELEGRAM_CHANNEL_ID && channelId.toString() !== TELEGRAM_CHANNEL_ID) {
             console.log(
                 `⚠️ Messaggio da canale non monitorato: ${channelId} (configurato: ${TELEGRAM_CHANNEL_ID})`,
@@ -399,7 +453,7 @@ function initTelegram() {
             await forwardToWhatsApp(message);
             console.log('✅ Messaggio inoltrato con successo su WhatsApp');
         } catch (error) {
-            console.error("❌ Errore nell'inoltro del messaggio:", error);
+            console.error("❌ Errore nell'inoltro del messaggio:", error.message);
 
             if (error.message && error.message.includes('@newsletter')) {
                 console.log(
@@ -419,7 +473,6 @@ function initTelegram() {
         console.error('❌ Errore avvio Telegram bot:', error);
     });
 
-    // Graceful shutdown
     process.once('SIGINT', () => bot.stop('SIGINT'));
     process.once('SIGTERM', () => bot.stop('SIGTERM'));
 }
@@ -500,62 +553,114 @@ function convertTelegramFormatting(text, entities) {
     return result;
 }
 
+// === FUNZIONE FORWARD MIGLIORATA CON RETRY ===
+
 async function forwardToWhatsApp(telegramMessage) {
-    if (!whatsappClient || !isWhatsAppReady) {
-        throw new Error('WhatsApp client non pronto');
+    const maxRetries = 3;
+    let attempt = 0;
+
+    while (attempt < maxRetries) {
+        try {
+            const isHealthy = await isWhatsAppClientHealthy();
+            if (!isHealthy) {
+                throw new Error('WhatsApp client non sano - richiesta reinizializzazione');
+            }
+
+            let content = '';
+            let media = null;
+
+            if (telegramMessage.text) {
+                content = convertTelegramFormatting(telegramMessage.text, telegramMessage.entities);
+            }
+
+            if (telegramMessage.caption) {
+                content = convertTelegramFormatting(
+                    telegramMessage.caption,
+                    telegramMessage.caption_entities,
+                );
+            }
+
+            // Gestione media
+            if (telegramMessage.photo) {
+                const photo = telegramMessage.photo[telegramMessage.photo.length - 1];
+                const fileUrl = await getFileUrl(photo.file_id);
+                media = await MessageMedia.fromUrl(fileUrl, {
+                    unsafeMime: true,
+                    filename: `image_${Date.now()}.jpg`,
+                });
+            }
+
+            if (telegramMessage.video) {
+                const fileUrl = await getFileUrl(telegramMessage.video.file_id);
+                media = await MessageMedia.fromUrl(fileUrl, {
+                    unsafeMime: true,
+                    filename: telegramMessage.video.file_name || `video_${Date.now()}.mp4`,
+                });
+            }
+
+            if (telegramMessage.document) {
+                const fileUrl = await getFileUrl(telegramMessage.document.file_id);
+                media = await MessageMedia.fromUrl(fileUrl, {
+                    filename: telegramMessage.document.file_name,
+                    unsafeMime: true,
+                });
+            }
+
+            const channelId = WHATSAPP_CHANNEL_ID;
+
+            const sendPromise = media
+            ? whatsappClient.sendMessage(channelId, media, {
+                caption: content || undefined,
+                sendMediaAsDocument: false,
+            })
+            : whatsappClient.sendMessage(channelId, content);
+
+            await Promise.race([
+                sendPromise,
+                new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('Timeout invio messaggio')), 30000),
+                ),
+            ]);
+
+            return; // Successo
+        } catch (error) {
+            attempt++;
+            console.log(`❌ Tentativo ${attempt}/${maxRetries} fallito:`, error.message);
+
+            if (
+                error.message.includes('Session closed') ||
+                error.message.includes('page has been closed') ||
+                error.message.includes('Target closed') ||
+                error.message.includes('non sano')
+            ) {
+                console.log('🔄 Errore di sessione rilevato, reinizializzazione in corso...');
+                isWhatsAppReady = false;
+
+                try {
+                    await whatsappClient.destroy();
+                } catch (destroyError) {
+                    console.log('⚠️ Errore durante destroy del client:', destroyError.message);
+                }
+
+                setTimeout(() => {
+                    console.log('🚀 Reinizializzazione WhatsApp...');
+                    initWhatsApp();
+                }, 5000);
+
+                throw new Error(
+                    `Sessione WhatsApp chiusa, reinizializzazione avviata. Riprova tra qualche minuto.`,
+                );
+            }
+
+            if (attempt < maxRetries) {
+                const waitTime = attempt * 2000;
+                console.log(`⏰ Attesa ${waitTime / 1000}s prima del prossimo tentativo...`);
+                await new Promise((resolve) => setTimeout(resolve, waitTime));
+            }
+        }
     }
 
-    let content = '';
-    let media = null;
-
-    if (telegramMessage.text) {
-        content = convertTelegramFormatting(telegramMessage.text, telegramMessage.entities);
-    }
-
-    if (telegramMessage.caption) {
-        content = convertTelegramFormatting(
-            telegramMessage.caption,
-            telegramMessage.caption_entities,
-        );
-    }
-
-    // Gestione media
-    if (telegramMessage.photo) {
-        const photo = telegramMessage.photo[telegramMessage.photo.length - 1];
-        const fileUrl = await getFileUrl(photo.file_id);
-        media = await MessageMedia.fromUrl(fileUrl, {
-            unsafeMime: true,
-            filename: `image_${Date.now()}.jpg`,
-        });
-    }
-
-    if (telegramMessage.video) {
-        const fileUrl = await getFileUrl(telegramMessage.video.file_id);
-        media = await MessageMedia.fromUrl(fileUrl, {
-            unsafeMime: true,
-            filename: telegramMessage.video.file_name || `video_${Date.now()}.mp4`,
-        });
-    }
-
-    if (telegramMessage.document) {
-        const fileUrl = await getFileUrl(telegramMessage.document.file_id);
-        media = await MessageMedia.fromUrl(fileUrl, {
-            filename: telegramMessage.document.file_name,
-            unsafeMime: true,
-        });
-    }
-
-    // Invia al canale WhatsApp
-    const channelId = WHATSAPP_CHANNEL_ID;
-
-    if (media) {
-        await whatsappClient.sendMessage(channelId, media, {
-            caption: content || undefined,
-            sendMediaAsDocument: false,
-        });
-    } else if (content) {
-        await whatsappClient.sendMessage(channelId, content);
-    }
+    throw new Error(`Fallimento invio dopo ${maxRetries} tentativi`);
 }
 
 async function getFileUrl(fileId) {
@@ -596,7 +701,6 @@ async function logWhatsAppChannels() {
 console.log('🚀 Avviando il sistema...');
 console.log(`🎯 Canale WhatsApp target: ${WHATSAPP_CHANNEL_ID}`);
 
-// Avvia Express server
 const server = app.listen(PORT, () => {
     console.log(`🌐 Server HTTP avviato sulla porta ${PORT}`);
     console.log(`🔗 Interfaccia web: http://localhost:${PORT}`);
@@ -609,6 +713,7 @@ server.on('error', (err) => {
 // Graceful shutdown
 process.on('SIGTERM', () => {
     console.log('🛑 Ricevuto SIGTERM, spegnimento graceful...');
+    if (healthCheckInterval) clearInterval(healthCheckInterval);
     server.close(() => {
         console.log('✅ Server chiuso');
         process.exit(0);
@@ -617,6 +722,7 @@ process.on('SIGTERM', () => {
 
 process.on('SIGINT', () => {
     console.log('🛑 Ricevuto SIGINT, spegnimento graceful...');
+    if (healthCheckInterval) clearInterval(healthCheckInterval);
     server.close(() => {
         console.log('✅ Server chiuso');
         process.exit(0);
