@@ -3,8 +3,6 @@ const { Telegraf } = require('telegraf');
 const express = require('express');
 const QRCode = require('qrcode');
 const qrcode = require('qrcode-terminal');
-const fs = require('fs-extra');
-const path = require('path');
 
 require('dotenv').config();
 
@@ -29,8 +27,6 @@ let qrCodeData = null;
 let isWhatsAppReady = false;
 let whatsappClient = null;
 let healthCheckInterval = null;
-let initializationAttempts = 0;
-const MAX_INIT_ATTEMPTS = 3;
 
 // Middleware
 app.use(express.json());
@@ -66,7 +62,6 @@ app.get('/', (req, res) => {
         <a href="/status" class="button">📊 Status JSON</a>
         <a href="/channels" class="button">📺 Lista Canali</a>
         <a href="/health" class="button">💚 Health Check</a>
-        <a href="/reset" class="button" style="background: #dc3545;">🔄 Reset Session</a>
 
         <h3>📱 Comandi Telegram Bot:</h3>
         <p><strong>/status</strong> - Stato del sistema</p>
@@ -115,7 +110,6 @@ app.get('/', (req, res) => {
         .container { max-width: 400px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
         .spinner { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 30px; height: 30px; animation: spin 2s linear infinite; margin: 20px auto; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        .attempts { color: #666; font-size: 12px; margin-top: 10px; }
         </style>
         </head>
         <body>
@@ -123,7 +117,6 @@ app.get('/', (req, res) => {
         <h1>🔄 Inizializzazione Sistema</h1>
         <div class="spinner"></div>
         <p>Il sistema si sta avviando, attendere...</p>
-        <div class="attempts">Tentativo: ${initializationAttempts}/${MAX_INIT_ATTEMPTS}</div>
         <p><small>Configurazione in corso...</small></p>
         <script>
         setTimeout(() => location.reload(), 5000);
@@ -140,22 +133,10 @@ app.get('/health', (req, res) => {
         status: 'healthy',
         whatsappReady: isWhatsAppReady,
         telegramBotConfigured: !!TELEGRAM_BOT_TOKEN,
-        initAttempts: initializationAttempts,
-        maxAttempts: MAX_INIT_ATTEMPTS,
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
         memory: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB',
     });
-});
-
-app.get('/reset', async (req, res) => {
-    try {
-        console.log('🔄 Reset sessione richiesto via web...');
-        await resetWhatsAppSession();
-        res.json({ success: true, message: 'Reset avviato, ricarica la pagina tra 30 secondi' });
-    } catch (error) {
-        res.json({ success: false, error: error.message });
-    }
 });
 
 app.get('/ping', (req, res) => {
@@ -168,8 +149,6 @@ app.get('/status', (req, res) => {
         telegramBotConfigured: !!TELEGRAM_BOT_TOKEN,
         whatsappChannelId: WHATSAPP_CHANNEL_ID,
         telegramChannelId: TELEGRAM_CHANNEL_ID || 'Auto-detect',
-        initAttempts: initializationAttempts,
-        maxAttempts: MAX_INIT_ATTEMPTS,
         port: PORT,
         nodeEnv: process.env.NODE_ENV,
         timestamp: new Date().toISOString(),
@@ -199,61 +178,14 @@ app.get('/channels', async (req, res) => {
 
 // === FUNZIONI DI UTILITÀ ===
 
-async function resetWhatsAppSession() {
-    console.log('🔄 === RESET SESSIONE WHATSAPP ===');
-
-    isWhatsAppReady = false;
-    qrCodeData = null;
-
-    // Ferma health check
-    if (healthCheckInterval) {
-        clearInterval(healthCheckInterval);
-        healthCheckInterval = null;
-    }
-
-    // Distruggi client esistente
-    if (whatsappClient) {
-        try {
-            await whatsappClient.destroy();
-            console.log('✅ Client esistente distrutto');
-        } catch (error) {
-            console.log('⚠️ Errore durante distruzione client:', error.message);
-        }
-        whatsappClient = null;
-    }
-
-    // Rimuovi file di sessione
-    const sessionPaths = ['./whatsapp_session', './.wwebjs_auth', './.wwebjs_cache'];
-
-    for (const sessionPath of sessionPaths) {
-        try {
-            if (await fs.pathExists(sessionPath)) {
-                await fs.remove(sessionPath);
-                console.log(`✅ Rimosso: ${sessionPath}`);
-            }
-        } catch (error) {
-            console.log(`⚠️ Errore rimozione ${sessionPath}:`, error.message);
-        }
-    }
-
-    // Reset contatore tentativi
-    initializationAttempts = 0;
-
-    console.log('🚀 Riavvio inizializzazione WhatsApp...');
-    setTimeout(() => {
-        initWhatsApp();
-    }, 5000);
-}
-
 async function isWhatsAppClientHealthy() {
     if (!whatsappClient || !isWhatsAppReady) {
         return false;
     }
 
     try {
-        const state = await whatsappClient.getState();
-        console.log('💚 WhatsApp state:', state);
-        return state === 'CONNECTED';
+        await whatsappClient.getState();
+        return true;
     } catch (error) {
         console.log('⚠️ Client WhatsApp non sano:', error.message);
         return false;
@@ -268,10 +200,7 @@ function startWhatsAppHealthCheck() {
     healthCheckInterval = setInterval(async () => {
         if (isWhatsAppReady && whatsappClient) {
             try {
-                const state = await whatsappClient.getState();
-                if (state !== 'CONNECTED') {
-                    throw new Error(`State non valido: ${state}`);
-                }
+                await whatsappClient.getState();
                 console.log('💚 WhatsApp health check OK');
             } catch (error) {
                 console.log('❌ WhatsApp health check fallito:', error.message);
@@ -279,16 +208,15 @@ function startWhatsAppHealthCheck() {
                 if (
                     error.message.includes('Session closed') ||
                     error.message.includes('page has been closed') ||
-                    error.message.includes('Target closed') ||
-                    error.message.includes('UNPAIRED') ||
-                    error.message.includes('State non valido')
+                    error.message.includes('Target closed')
                 ) {
                     console.log('🔄 Forzando reinizializzazione per health check fallito');
-                    await resetWhatsAppSession();
+                    isWhatsAppReady = false;
+                    whatsappClient.emit('disconnected', 'Health check failed');
                 }
             }
         }
-    }, 90000); // Check ogni 90 secondi
+    }, 60000); // Check ogni minuto
 }
 
 // === CONFIGURAZIONE PUPPETEER MIGLIORATA ===
@@ -297,7 +225,7 @@ function getPuppeteerConfig() {
     console.log('🐳 === CONFIGURAZIONE PUPPETEER MIGLIORATA ===');
 
     const config = {
-        headless: 'new', // Usa la nuova modalità headless
+        headless: true,
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -313,26 +241,17 @@ function getPuppeteerConfig() {
             '--disable-features=VizDisplayCompositor',
             '--disable-web-security',
             '--disable-features=site-per-process',
+            '--single-process', // Importante per evitare crash
             '--disable-extensions',
             '--disable-plugins',
-            '--disable-blink-features=AutomationControlled',
-            '--no-default-browser-check',
-            '--disable-component-updates-ping',
-            // Memoria e stabilità
-            '--max_old_space_size=2048',
-            '--memory-pressure-off',
-            // Networking
-            '--aggressive-cache-discard',
-            '--disable-background-networking',
-            '--disable-default-apps',
         ],
         defaultViewport: {
-            width: 1366,
-            height: 768,
+            width: 1280,
+            height: 720,
         },
-        timeout: 180000, // 3 minuti
-        protocolTimeout: 180000,
-        keepAlive: false, // Importante per la stabilità
+        timeout: 120000,
+        protocolTimeout: 120000,
+        keepAlive: true,
     };
 
     if (process.env.NODE_ENV === 'production' && process.env.PUPPETEER_EXECUTABLE_PATH) {
@@ -346,20 +265,10 @@ function getPuppeteerConfig() {
     return config;
 }
 
-// === INIZIALIZZAZIONE WHATSAPP MIGLIORATA ===
+// === INIZIALIZZAZIONE WHATSAPP ===
 
 function initWhatsApp() {
-    initializationAttempts++;
-    console.log(
-        `🚀 Inizializzazione WhatsApp Client (tentativo ${initializationAttempts}/${MAX_INIT_ATTEMPTS})...`,
-    );
-
-    if (initializationAttempts > MAX_INIT_ATTEMPTS) {
-        console.error('❌ Raggiunto numero massimo di tentativi di inizializzazione');
-        console.log('🔄 Eseguendo reset completo...');
-        setTimeout(() => resetWhatsAppSession(), 10000);
-        return;
-    }
+    console.log('🚀 Inizializzazione WhatsApp Client...');
 
     const puppeteerConfig = getPuppeteerConfig();
 
@@ -373,24 +282,10 @@ function initWhatsApp() {
             remotePath:
                 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
         },
-        restartOnAuthFail: true,
-        takeoverOnConflict: true,
-        takeoverTimeoutMs: 60000,
     });
 
-    // Timeout per inizializzazione
-    const initTimeout = setTimeout(() => {
-        console.log('⏰ Timeout inizializzazione WhatsApp (3 minuti)');
-        whatsappClient.emit('disconnected', 'Initialization timeout');
-    }, 180000); // 3 minuti
-
-    // Event handlers migliorati
-    whatsappClient.on('loading_screen', (percent, message) => {
-        console.log(`🔄 Caricamento WhatsApp: ${percent}% - ${message}`);
-    });
-
+    // Event handlers
     whatsappClient.on('qr', async (qr) => {
-        clearTimeout(initTimeout);
         console.log('📱 QR Code ricevuto!');
 
         console.log('\n=== QR CODE PER WHATSAPP ===');
@@ -414,46 +309,28 @@ function initWhatsApp() {
         }
     });
 
-    whatsappClient.on('authenticated', (session) => {
-        clearTimeout(initTimeout);
-        console.log('🔐 WhatsApp autenticato');
-        qrCodeData = null;
-    });
-
-    whatsappClient.on('auth_failure', (msg) => {
-        clearTimeout(initTimeout);
-        console.error('❌ Fallimento autenticazione:', msg);
-        isWhatsAppReady = false;
-
-        // Reset e riprova
-        setTimeout(() => resetWhatsAppSession(), 10000);
-    });
-
     whatsappClient.on('ready', async () => {
-        clearTimeout(initTimeout);
-        console.log('✅ WhatsApp Client è PRONTO!');
+        console.log('✅ WhatsApp Client è pronto!');
         console.log(`🎯 Canale target configurato: ${WHATSAPP_CHANNEL_ID}`);
-
         isWhatsAppReady = true;
         qrCodeData = null;
-        initializationAttempts = 0; // Reset counter on success
 
         // Avvia health check periodico
         startWhatsAppHealthCheck();
 
         await logWhatsAppChannels();
+    });
 
-        // Test di connettività
-        try {
-            const state = await whatsappClient.getState();
-            console.log(`📡 Stato connessione WhatsApp: ${state}`);
-        } catch (error) {
-            console.log('⚠️ Errore nel check dello stato:', error.message);
-        }
+    whatsappClient.on('authenticated', () => {
+        console.log('🔐 WhatsApp autenticato');
+    });
+
+    whatsappClient.on('auth_failure', (msg) => {
+        console.error('❌ Fallimento autenticazione:', msg);
+        isWhatsAppReady = false;
     });
 
     whatsappClient.on('disconnected', async (reason) => {
-        clearTimeout(initTimeout);
         console.log('⚠️ WhatsApp disconnesso:', reason);
         isWhatsAppReady = false;
         qrCodeData = null;
@@ -472,34 +349,17 @@ function initWhatsApp() {
 
         whatsappClient = null;
 
-        // Strategia di reconnessione intelligente
-        const reconnectDelay = initializationAttempts * 30000; // Aumenta delay per ogni tentativo
-        console.log(`🔄 Riconnessione automatica tra ${reconnectDelay / 1000} secondi...`);
-
         setTimeout(() => {
             console.log('🔄 Tentativo di riconnessione automatica...');
             initWhatsApp();
-        }, reconnectDelay);
+        }, 30000);
     });
 
     whatsappClient.on('error', (error) => {
-        clearTimeout(initTimeout);
         console.error('❌ Errore WhatsApp Client:', error);
-
-        // Gestione errori critici
-        if (
-            error.message.includes('Navigation failed') ||
-            error.message.includes('net::ERR_') ||
-            error.message.includes('Protocol error')
-        ) {
-            console.log('🔄 Errore critico rilevato, reset sessione...');
-            setTimeout(() => resetWhatsAppSession(), 5000);
-        }
     });
 
-    // Inizializza con timeout di sicurezza
     whatsappClient.initialize().catch((error) => {
-        clearTimeout(initTimeout);
         console.error('❌ Errore fatale durante inizializzazione WhatsApp:', error);
         console.error('🔍 Debug info:');
         console.error('   Node version:', process.version);
@@ -509,17 +369,11 @@ function initWhatsApp() {
             '   Memory:',
             Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB',
         );
-        console.error('   Attempt:', initializationAttempts);
 
-        if (initializationAttempts >= MAX_INIT_ATTEMPTS) {
-            console.log('💥 Troppi tentativi falliti, reset completo...');
-            setTimeout(() => resetWhatsAppSession(), 30000);
-        } else {
-            setTimeout(() => {
-                console.log('🔄 Restart automatico dopo errore fatale...');
-                initWhatsApp();
-            }, 60000);
-        }
+        setTimeout(() => {
+            console.log('🔄 Restart automatico dopo errore fatale...');
+            process.exit(1);
+        }, 60000);
     });
 }
 
@@ -538,25 +392,14 @@ function initTelegram() {
         const status = {
             whatsapp: isWhatsAppReady ? '✅ Connesso' : '❌ Disconnesso',
             canaleTarget: WHATSAPP_CHANNEL_ID,
-            tentativi: `${initializationAttempts}/${MAX_INIT_ATTEMPTS}`,
             uptime: Math.floor(process.uptime() / 60) + ' minuti',
             memory: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB',
             timestamp: new Date().toLocaleString('it-IT'),
         };
 
         ctx.reply(
-            `🤖 Status Sistema:\n\nWhatsApp: ${status.whatsapp}\nCanale Target: ${status.canaleTarget}\nTentativi: ${status.tentativi}\nUptime: ${status.uptime}\nMemoria: ${status.memory}\nAggiornato: ${status.timestamp}`,
+            `🤖 Status Sistema:\n\nWhatsApp: ${status.whatsapp}\nCanale Target: ${status.canaleTarget}\nUptime: ${status.uptime}\nMemoria: ${status.memory}\nAggiornato: ${status.timestamp}`,
         );
-    });
-
-    bot.command('reset', async (ctx) => {
-        ctx.reply('🔄 Avvio reset sessione WhatsApp...');
-        try {
-            await resetWhatsAppSession();
-            ctx.reply('✅ Reset avviato, il sistema si riavvierà automaticamente');
-        } catch (error) {
-            ctx.reply(`❌ Errore durante reset: ${error.message}`);
-        }
     });
 
     bot.command('channels', async (ctx) => {
@@ -775,7 +618,7 @@ async function forwardToWhatsApp(telegramMessage) {
             await Promise.race([
                 sendPromise,
                 new Promise((_, reject) =>
-                    setTimeout(() => reject(new Error('Timeout invio messaggio')), 45000),
+                    setTimeout(() => reject(new Error('Timeout invio messaggio')), 30000),
                 ),
             ]);
 
@@ -788,18 +631,29 @@ async function forwardToWhatsApp(telegramMessage) {
                 error.message.includes('Session closed') ||
                 error.message.includes('page has been closed') ||
                 error.message.includes('Target closed') ||
-                error.message.includes('non sano') ||
-                error.message.includes('UNPAIRED')
+                error.message.includes('non sano')
             ) {
                 console.log('🔄 Errore di sessione rilevato, reinizializzazione in corso...');
-                await resetWhatsAppSession();
+                isWhatsAppReady = false;
+
+                try {
+                    await whatsappClient.destroy();
+                } catch (destroyError) {
+                    console.log('⚠️ Errore durante destroy del client:', destroyError.message);
+                }
+
+                setTimeout(() => {
+                    console.log('🚀 Reinizializzazione WhatsApp...');
+                    initWhatsApp();
+                }, 5000);
+
                 throw new Error(
                     `Sessione WhatsApp chiusa, reinizializzazione avviata. Riprova tra qualche minuto.`,
                 );
             }
 
             if (attempt < maxRetries) {
-                const waitTime = attempt * 3000; // Aumentato wait time
+                const waitTime = attempt * 2000;
                 console.log(`⏰ Attesa ${waitTime / 1000}s prima del prossimo tentativo...`);
                 await new Promise((resolve) => setTimeout(resolve, waitTime));
             }
@@ -833,17 +687,7 @@ async function logWhatsAppChannels() {
             console.log('❌ Canale target NON trovato');
             console.log(`   ID cercato: ${WHATSAPP_CHANNEL_ID}`);
             console.log(`   Canali disponibili: ${channels.length}`);
-            console.log('   💡 Usa il comando /channels del bot per vedere tutti i canali');
-
-            // Mostra primi 5 canali come suggerimento
-            if (channels.length > 0) {
-                console.log('   🔍 Primi canali disponibili:');
-                channels.slice(0, 5).forEach((ch, idx) => {
-                    console.log(
-                        `   ${idx + 1}. ${ch.name || 'N/A'} - ${ch.id._serialized || ch.id}`,
-                    );
-                });
-            }
+            console.log("   Verifica l'ID del canale nelle variabili d'ambiente");
         }
 
         console.log('═══════════════════════════════════════\n');
@@ -852,126 +696,50 @@ async function logWhatsAppChannels() {
     }
 }
 
-// === MONITORAGGIO MEMORIA E PERFORMANCE ===
-
-function startMemoryMonitoring() {
-    setInterval(() => {
-        const memUsage = process.memoryUsage();
-        const memMB = Math.round(memUsage.heapUsed / 1024 / 1024);
-
-        if (memMB > 800) {
-            // Alert se supera 800MB
-            console.log(`⚠️ Uso memoria elevato: ${memMB}MB`);
-
-            // Garbage collection manuale se disponibile
-            if (global.gc) {
-                console.log('🧹 Eseguendo garbage collection...');
-                global.gc();
-            }
-        }
-    }, 300000); // Check ogni 5 minuti
-}
-
 // === AVVIO SISTEMA ===
 
-console.log('🚀 Avviando il sistema migliorato...');
+console.log('🚀 Avviando il sistema...');
 console.log(`🎯 Canale WhatsApp target: ${WHATSAPP_CHANNEL_ID}`);
 
 const server = app.listen(PORT, () => {
     console.log(`🌐 Server HTTP avviato sulla porta ${PORT}`);
     console.log(`🔗 Interfaccia web: http://localhost:${PORT}`);
-    console.log(`🔄 Reset disponibile su: http://localhost:${PORT}/reset`);
 });
 
 server.on('error', (err) => {
     console.error('❌ Errore server:', err);
 });
 
-server.timeout = 120000; // Timeout di 2 minuti per le richieste
-
-// Graceful shutdown migliorato
-const gracefulShutdown = async (signal) => {
-    console.log(`🛑 Ricevuto ${signal}, spegnimento graceful...`);
-
-    if (healthCheckInterval) {
-        clearInterval(healthCheckInterval);
-        console.log('✅ Health check fermato');
-    }
-
-    if (whatsappClient) {
-        try {
-            await whatsappClient.destroy();
-            console.log('✅ Client WhatsApp chiuso');
-        } catch (error) {
-            console.log('⚠️ Errore chiusura client:', error.message);
-        }
-    }
-
+// Graceful shutdown
+process.on('SIGTERM', () => {
+    console.log('🛑 Ricevuto SIGTERM, spegnimento graceful...');
+    if (healthCheckInterval) clearInterval(healthCheckInterval);
     server.close(() => {
-        console.log('✅ Server HTTP chiuso');
+        console.log('✅ Server chiuso');
         process.exit(0);
     });
+});
 
-    // Force exit dopo 10 secondi
-    setTimeout(() => {
-        console.log('⏰ Force exit dopo timeout');
-        process.exit(1);
-    }, 10000);
-};
+process.on('SIGINT', () => {
+    console.log('🛑 Ricevuto SIGINT, spegnimento graceful...');
+    if (healthCheckInterval) clearInterval(healthCheckInterval);
+    server.close(() => {
+        console.log('✅ Server chiuso');
+        process.exit(0);
+    });
+});
 
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-
-// Avvia monitoraggio memoria
-startMemoryMonitoring();
-
-// Inizializza i client con delay
-console.log('⏰ Avvio WhatsApp tra 3 secondi...');
-setTimeout(() => {
-    initWhatsApp();
-}, 3000);
-
-console.log('⏰ Avvio Telegram Bot tra 10 secondi...');
+// Inizializza i client
+initWhatsApp();
 setTimeout(() => {
     initTelegram();
-}, 10000);
+}, 5000);
 
-// Gestione errori non catturati migliorata
-process.on('unhandledRejection', (error, promise) => {
-    console.error('❌ Unhandled rejection at:', promise, 'reason:', error);
-
-    // Se l'errore è critico, riavvia il sistema
-    if (
-        error.message &&
-        (error.message.includes('Protocol error') ||
-            error.message.includes('Navigation failed') ||
-            error.message.includes('Target closed'))
-    ) {
-        console.log('🔄 Errore critico rilevato, reset sistema...');
-        setTimeout(() => resetWhatsAppSession(), 5000);
-    }
+// Gestione errori non catturati
+process.on('unhandledRejection', (error) => {
+    console.error('❌ Unhandled rejection:', error);
 });
 
 process.on('uncaughtException', (error) => {
     console.error('❌ Uncaught exception:', error);
-
-    // Log dell'errore e tentativo di graceful shutdown
-    console.log('🔄 Tentativo di recupero...');
-    setTimeout(() => {
-        if (!isWhatsAppReady) {
-            console.log('🚀 Sistema non operativo, reset automatico...');
-            resetWhatsAppSession();
-        }
-    }, 10000);
 });
-
-// Heartbeat per mantenere il processo attivo
-setInterval(() => {
-    console.log(
-        `💓 Heartbeat - Uptime: ${Math.floor(process.uptime() / 60)}min - Memory: ${Math.round(
-            process.memoryUsage().heapUsed / 1024 / 1024,
-        )}MB - WhatsApp: ${isWhatsAppReady ? 'OK' : 'DOWN'}`,
-    );
-}, 600000); // Ogni 10 minuti
-
-console.log('🎉 Sistema inizializzato con successo!');
